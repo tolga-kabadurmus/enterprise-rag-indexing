@@ -9,15 +9,15 @@ the real RustFS and Qdrant adapters are implemented.
 import asyncio
 import hashlib
 import logging
-from dataclasses import dataclass
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.jobs.base import AsyncIndexingJob, IndexingJobArguments
 
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class MockIndexedChunk:
+class MockIndexedChunk(BaseModel):
     """Metadata produced for one simulated indexed chunk.
 
     Attributes:
@@ -28,11 +28,13 @@ class MockIndexedChunk:
         page_number: Simulated one-based PDF page number.
     """
 
-    source_bucket: str
-    object_key: str
-    document_id: str
-    chunk_id: str
-    page_number: int = 1
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_bucket: str = Field(min_length=1)
+    object_key: str = Field(min_length=1)
+    document_id: str = Field(min_length=1)
+    chunk_id: str = Field(min_length=1)
+    page_number: int = Field(default=1, ge=1)
 
 
 class MockPDFDocumentIndexing(AsyncIndexingJob):

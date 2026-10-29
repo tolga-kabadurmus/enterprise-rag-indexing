@@ -1,5 +1,6 @@
 boto3==1.43.121
 onnxruntime==1.31.1
+pydantic==2.14.1
 pydantic-settings==2.16.2
 pypdf==6.19.0
 pypdfium2==5.14.0

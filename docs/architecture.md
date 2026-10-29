@@ -37,6 +37,17 @@ from `DocumentIndexerFactory`, which answers "how should this content type be
 indexed?", and `RepositoryFactory`, which answers "which infrastructure
 provider should be used?"
 
+## Validated data models
+
+Command inputs, job arguments, pipeline registrations, and chunk metadata use
+frozen Pydantic `BaseModel` classes. Pydantic performs boundary validation,
+rejects unknown fields, and provides predictable serialization without making
+behavior-oriented jobs or registries inherit from a data-model base class.
+
+Environment-backed application configuration must use
+`pydantic-settings.BaseSettings`. Direct environment access belongs in a
+settings composition boundary rather than repositories, use cases, or jobs.
+
 ## Clean Architecture placement
 
 Repositories own external access to RustFS/S3, embedding providers and Qdrant.

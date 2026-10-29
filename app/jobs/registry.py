@@ -1,12 +1,13 @@
 """Explicit registry for executable asynchronous indexing pipelines."""
 
-from dataclasses import dataclass
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.jobs.runner import JobFactory
 
 
-@dataclass(frozen=True, slots=True)
-class IndexingPipelineRegistration:
+class IndexingPipelineRegistration(BaseModel):
     """Describe one pipeline exposed by the command-line application.
 
     Attributes:
@@ -15,15 +16,21 @@ class IndexingPipelineRegistration:
         job_factory: Composition callable that builds the asynchronous job.
     """
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     name: str
     description: str
     job_factory: JobFactory
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def validate_text(self) -> Self:
+        """Reject blank pipeline names and descriptions."""
+
         if not self.name.strip():
             raise ValueError("pipeline name must not be empty")
         if not self.description.strip():
             raise ValueError("pipeline description must not be empty")
+        return self
 
 
 class IndexingPipelineRegistry:

@@ -15,6 +15,8 @@ The repository currently provides:
 - a runnable mock PDF indexing job with bounded async concurrency,
   deterministic identifiers, and structured lifecycle logging;
 - an explicit pipeline registry and required `--pipeline` CLI selection;
+- frozen Pydantic models for validated commands, job arguments, registrations,
+  and mock chunk metadata;
 - a runner and factory boundary for real indexing jobs;
 - pinned libraries for RustFS/S3, PDF extraction and rendering, RapidOCR, and
   Qdrant;

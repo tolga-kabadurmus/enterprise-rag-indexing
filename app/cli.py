@@ -4,7 +4,9 @@ import argparse
 import asyncio
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.jobs.base import IndexingJobArguments
 from app.jobs.registry import IndexingPipelineRegistry
@@ -13,8 +15,7 @@ from app.jobs.runner import execute_job_from_factory
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class IndexingCommandArguments:
+class IndexingCommandArguments(BaseModel):
     """Pipeline selection and job-specific arguments parsed from the CLI.
 
     Attributes:
@@ -23,17 +24,23 @@ class IndexingCommandArguments:
         list_pipelines: Whether the caller requested pipeline discovery.
     """
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     pipeline: str | None
     job: IndexingJobArguments | None
     list_pipelines: bool = False
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def validate_command_state(self) -> Self:
+        """Require either a complete execution command or listing command."""
+
         listing_state = self.pipeline is None and self.job is None
         execution_state = self.pipeline is not None and self.job is not None
         if self.list_pipelines != listing_state or not (
             listing_state or execution_state
         ):
             raise ValueError("invalid indexing command argument state")
+        return self
 
 
 def build_parser(pipeline_names: Sequence[str]) -> argparse.ArgumentParser:

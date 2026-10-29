@@ -26,6 +26,10 @@ venv/bin/python -m unittest discover -s tests -v
 Repository integration tests must be separate from unit tests and require
 explicit RustFS and Qdrant configuration.
 
+The runtime requirements explicitly pin both `pydantic` and
+`pydantic-settings`. Data records that cross application boundaries use frozen
+Pydantic models; future environment configuration must use `BaseSettings`.
+
 ## Documentation
 
 Preview the site while editing:

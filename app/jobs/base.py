@@ -1,12 +1,13 @@
 """Base contract for one-shot asynchronous indexing jobs."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from types import TracebackType
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-@dataclass(frozen=True, slots=True)
-class IndexingJobArguments:
+class IndexingJobArguments(BaseModel):
     """Validated object selection and concurrency settings for an indexing job.
 
     An exact object key and a key prefix are mutually exclusive. When both are
@@ -24,20 +25,24 @@ class IndexingJobArguments:
             concurrency value is less than one.
     """
 
-    source_bucket: str
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source_bucket: str = Field(min_length=1)
     object_key: str | None = None
     key_prefix: str | None = None
-    concurrency: int = 4
+    concurrency: int = Field(default=4, ge=1)
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def validate_selection(self) -> Self:
+        """Validate bucket text and mutually exclusive object selectors."""
+
         if not self.source_bucket.strip():
             raise ValueError("source_bucket must not be empty")
         if self.object_key is not None and not self.object_key:
             raise ValueError("object_key must not be empty")
         if self.object_key is not None and self.key_prefix is not None:
             raise ValueError("object_key and key_prefix are mutually exclusive")
-        if self.concurrency < 1:
-            raise ValueError("concurrency must be at least 1")
+        return self
 
 
 class AsyncIndexingJob(ABC):
