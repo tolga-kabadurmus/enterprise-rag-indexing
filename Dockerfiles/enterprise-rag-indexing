@@ -1,0 +1,16 @@
+FROM enterprise_rag_base:latest
+
+USER root 
+
+COPY requirements.txt ./
+RUN python -m pip install --requirement requirements.txt
+
+COPY ./app ./app
+
+USER appuser
+WORKDIR /app
+
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+
+# Replace this with the one-shot indexing CLI when its module is implemented.
+CMD ["python", "--version"]
