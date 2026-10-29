@@ -1,8 +1,19 @@
 # Enterprise RAG — Indexing
 
-`enterprise-rag-indexing` is the document ingestion and indexing component of the Enterprise RAG prototype. It runs as a **one-shot, asynchronous job**: read eligible documents from MinIO (S3-compatible storage), extract their text, split it into chunks, generate embeddings, and write vectors with source metadata to Qdrant.
+`enterprise-rag-indexing` is the document ingestion and indexing component of the Enterprise RAG prototype. It runs as a **one-shot, asynchronous job**: read eligible documents from RustFS through its S3-compatible API, extract their text, split it into chunks, generate embeddings, and write vectors with source metadata to Qdrant.
 
 For project-wide architecture and coding conventions, see the root [`AGENTS.md`](https://github.com/tolga-kabadurmus/enterprise-rag/blob/main/AGENTS.md) in the orchestration repository. The URL assumes that repository is created under the indicated GitHub account.
+
+## Documentation
+
+The full developer documentation starts at [`docs/index.md`](docs/index.md) and is configured by `mkdocs.yml`. It covers architecture, asynchronous job lifecycle, CLI arguments, PDF/RapidOCR decisions, development commands, and an API reference generated from Python docstrings.
+
+```bash
+python3 -m virtualenv venv
+venv/bin/python -m pip install -r requirements-docs.txt
+venv/bin/mkdocs serve
+venv/bin/mkdocs build --strict
+```
 
 ## Responsibilities
 
@@ -17,7 +28,7 @@ For project-wide architecture and coding conventions, see the root [`AGENTS.md`]
 ## Conceptual processing flow
 
 ```text
-MinIO source bucket (+ optional prefix)
+RustFS source bucket (+ optional prefix)
             |
             v
     Object discovery / claim
@@ -72,10 +83,10 @@ The source bucket and optional key prefix are **runtime CLI arguments** rather t
 
 ## Running with Docker Compose
 
-This module is a Git submodule of the top-level [`enterprise-rag`](https://github.com/tolga-kabadurmus/enterprise-rag) repository, where `docker-compose.yaml` is defined. From that repository root, after starting MinIO and Qdrant:
+This module is a Git submodule of the top-level [`enterprise-rag`](https://github.com/tolga-kabadurmus/enterprise-rag) repository, where `docker-compose.yaml` is defined. From that repository root, after starting RustFS and Qdrant:
 
 ```bash
-docker compose up -d minio qdrant
+docker compose --profile dev up -d rustfs qdrant
 docker compose run --rm enterprise-rag-indexing --source-bucket documents --key-prefix ""
 ```
 
@@ -95,7 +106,7 @@ Keep dependency specifications in this repository's own `requirements.txt` and i
 
 ## Testing and documentation
 
-Use unit tests for chunking, metadata, factories, use cases, and controllers, with mocked/fake repositories. Validate real MinIO and Qdrant interaction in separate integration tests. Record successful/failed object counts, chunk counts, and durations without logging secrets or full document text. MkDocs is the selected documentation framework.
+Use unit tests for chunking, metadata, factories, use cases, and controllers, with mocked/fake repositories. Validate real RustFS and Qdrant interaction in separate integration tests. Record successful/failed object counts, chunk counts, and durations without logging secrets or full document text. Validate documentation with `mkdocs build --strict`.
 
 ## Scope
 
