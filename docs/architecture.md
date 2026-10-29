@@ -20,8 +20,22 @@ concrete AsyncIndexingJob
     +--> Qdrant repository -> idempotent upserts
 ```
 
-Only the CLI, job contract and runner exist today. The remaining components are
-the planned next implementation stages.
+The CLI, job contract, runner, and a side-effect-free mock implementation exist
+today. The mock validates composition, concurrency, deterministic identifiers,
+logging, and cleanup. The external pipeline components shown above remain the
+planned next implementation stages.
+
+## Pipeline selection
+
+`IndexingPipelineRegistry` maps stable CLI names to factories that construct
+`AsyncIndexingJob` implementations. `app.main` owns the explicit registrations;
+the shared CLI resolves `--pipeline` and passes the remaining validated job
+arguments to the selected factory. Only executable pipelines are registered.
+
+This top-level registry answers "which job should run?" It remains separate
+from `DocumentIndexerFactory`, which answers "how should this content type be
+indexed?", and `RepositoryFactory`, which answers "which infrastructure
+provider should be used?"
 
 ## Clean Architecture placement
 

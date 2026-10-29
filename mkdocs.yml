@@ -34,4 +34,4 @@ markdown_extensions:
   - fenced_code
   - tables
   - toc:
-    permalink: true
+      permalink: true

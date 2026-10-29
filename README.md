@@ -87,10 +87,14 @@ This module is a Git submodule of the top-level [`enterprise-rag`](https://githu
 
 ```bash
 docker compose --profile dev up -d rustfs qdrant
-docker compose run --rm enterprise-rag-indexing --source-bucket documents --key-prefix ""
+docker compose --profile dev run --rm enterprise-rag-indexing \
+  python -m app.main \
+  --pipeline mock-pdf \
+  --source-bucket documents \
+  --key-prefix contracts/2026/
 ```
 
-**Planned command, not yet verified:** The example assumes a Compose service called `enterprise-rag-indexing` whose image entrypoint forwards the flags to the indexing CLI. The final implementation must make its argument names and staging configuration consistent with this README. The Dockerfile must use `dumb-init` as its entrypoint/PID 1 mechanism. A development bind mount of this repository's source code is expected in the root Compose file.
+The required `--pipeline` argument is resolved through an explicit registry. Use `python -m app.main --list-pipelines` to inspect pipelines implemented by the image. `mock-pdf` validates CLI parsing, asynchronous lifecycle, concurrency, deterministic IDs, logging, and cleanup. It does **not** read RustFS, extract documents, generate embeddings, or write Qdrant points. The Dockerfile uses `dumb-init` as its entrypoint/PID 1 mechanism, and the development service bind-mounts the local `app` package for rapid code changes.
 
 Check the root project's README for cloning submodules and stopping the stack. This indexing container is a disposable job; it should not run as a persistent daemon.
 

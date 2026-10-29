@@ -1,4 +1,4 @@
-FROM enterprise_rag_base:latest
+FROM enterprise_rag_base
 
 USER root 
 
@@ -12,5 +12,4 @@ WORKDIR /app
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 
-# Replace this with the one-shot indexing CLI when its module is implemented.
-CMD ["python", "--version"]
+CMD ["python", "-m", "app.main"]
