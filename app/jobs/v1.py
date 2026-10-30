@@ -29,11 +29,18 @@ from app.document_indexers.factory import (
 )
 from app.jobs.base import IndexingJobArguments
 from app.pipelines.base import BasePipeline
-from app.repository.embedding_service.base import EmbeddingRepository
+from app.repository.embedding_service.base import (
+    EmbeddingRepository,
+    EmbeddingVector,
+)
 from app.repository.exceptions import S3ObjectNotFoundError
 from app.repository.models import S3ObjectMetadata
 from app.repository.s3.base import StorageRepositoryBase
-from app.repository.vector.base import VectorPoint, VectorRepositoryBase
+from app.repository.vector.base import (
+    SparseVector,
+    VectorPoint,
+    VectorRepositoryBase,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -76,7 +83,7 @@ class ObjectProcessingResult(BaseModel):
     ]
     normalized_content_type: str | None = None
     chunks: tuple[DocumentChunk, ...] = ()
-    embeddings: tuple[tuple[float, ...], ...] = ()
+    embeddings: tuple[EmbeddingVector, ...] = ()
     detail: str = Field(min_length=1)
     elapsed_seconds: float = Field(ge=0)
 
@@ -459,7 +466,7 @@ class V1IndexingPipeline(BasePipeline):
                             local_path=local_path,
                         )
                     )
-                embeddings: tuple[tuple[float, ...], ...] = ()
+                embeddings: tuple[EmbeddingVector, ...] = ()
                 if indexing_result.chunks:
                     try:
                         embeddings = await self._embed_chunks(
@@ -548,12 +555,12 @@ class V1IndexingPipeline(BasePipeline):
     async def _embed_chunks(
         self,
         chunks: tuple[DocumentChunk, ...],
-    ) -> tuple[tuple[float, ...], ...]:
-        """Vectorize chunks in bounded batches through the shared service."""
+    ) -> tuple[EmbeddingVector, ...]:
+        """Vectorize chunks into aligned dense and sparse representations."""
 
         batch_size = self.embedding_repository.max_batch_size
         max_text_characters = self.embedding_repository.max_text_characters
-        vectors: list[tuple[float, ...]] = []
+        vectors: list[EmbeddingVector] = []
         batch: list[DocumentChunk] = []
         batch_characters = 0
         for chunk in chunks:
@@ -589,7 +596,7 @@ class V1IndexingPipeline(BasePipeline):
     async def _upsert_chunks(
         self,
         chunks: tuple[DocumentChunk, ...],
-        embeddings: tuple[tuple[float, ...], ...],
+        embeddings: tuple[EmbeddingVector, ...],
     ) -> None:
         """Persist aligned vectors with complete retrieval and citation payloads."""
 
@@ -598,7 +605,11 @@ class V1IndexingPipeline(BasePipeline):
         points = tuple(
             VectorPoint(
                 point_id=chunk.chunk_id,
-                dense_vector=vector,
+                dense_vector=embedding.dense,
+                sparse_vector=SparseVector(
+                    indices=embedding.sparse.indices,
+                    values=embedding.sparse.values,
+                ),
                 payload={
                     "text": chunk.text,
                     "document_id": chunk.document_id,
@@ -616,7 +627,7 @@ class V1IndexingPipeline(BasePipeline):
                     "processing_object_key": chunk.processing_object_key,
                 },
             )
-            for chunk, vector in zip(chunks, embeddings, strict=True)
+            for chunk, embedding in zip(chunks, embeddings, strict=True)
         )
         await self.vector_repository.upsert_points(points)
 
@@ -736,7 +747,7 @@ class V1IndexingPipeline(BasePipeline):
         started_at: float,
         normalized_content_type: str | None = None,
         chunks: tuple[DocumentChunk, ...] = (),
-        embeddings: tuple[tuple[float, ...], ...] = (),
+        embeddings: tuple[EmbeddingVector, ...] = (),
     ) -> ObjectProcessingResult:
         return ObjectProcessingResult(
             bucket=source.bucket,

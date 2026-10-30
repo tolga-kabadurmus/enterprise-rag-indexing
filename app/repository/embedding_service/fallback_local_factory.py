@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from app.repository.embedding_service.base import EmbeddingRepository
+from app.repository.embedding_service.base import EmbeddingRepository, EmbeddingVector
 
 
 class FallBackLocalEmbeddingFactory(EmbeddingRepository):
@@ -24,7 +24,7 @@ class FallBackLocalEmbeddingFactory(EmbeddingRepository):
         self,
         texts: tuple[str, ...],
         input_type: Literal["document", "query"] = "document",
-    ) -> tuple[tuple[float, ...], ...]:
+    ) -> tuple[EmbeddingVector, ...]:
         """Reject vectorization because local embedding is not implemented."""
 
         raise NotImplementedError("local embedding fallback is not implemented")

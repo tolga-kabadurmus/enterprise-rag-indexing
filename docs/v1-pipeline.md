@@ -15,10 +15,10 @@
 6. use the injected pooled HTTPX embedding repository;
 7. download each claimed processing PDF into the ephemeral workspace;
 8. extract embedded page text and create page-bounded chunks;
-9. request one vector per chunk in batches bounded by text count and aggregate
-   characters;
-10. upsert deterministic chunk points to the named Qdrant `dense` vector with
-    chunk text and citation metadata;
+9. request one aligned dense/sparse embedding record per chunk in batches
+   bounded by text count and aggregate characters;
+10. upsert deterministic chunk points to the named Qdrant `dense` and `sparse`
+    vectors with chunk text and citation metadata;
 11. on embedding or Qdrant failure, copy the document to
     `error/<original-object-key>` in its source bucket, verify the copy, and
     delete the processing copy; and
@@ -81,6 +81,8 @@ never written to normal logs. `chunk_id` is the deterministic point ID, making
 retries idempotent.
 
 Startup validates named `dense` and `sparse` vectors and requires IDF for
-`sparse`. Points currently contain only `dense` because the embedding service
-does not yet return sparse vectors. Hybrid retrieval remains inactive until a
-real sparse encoder is implemented.
+`sparse`. Each point contains a normalized multilingual E5 dense vector and a
+sparse vector whose indices are sorted tokenizer IDs and whose values are
+positive token frequencies. The embedding adapter validates the dense model,
+sparse model, vector dimensions, and one-to-one batch alignment before Qdrant
+persistence. Hybrid retrieval remains a query-service concern.

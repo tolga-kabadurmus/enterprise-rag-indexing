@@ -5,7 +5,11 @@ from typing import Literal
 from app.jobs.base import IndexingJobArguments
 from app.jobs.runner import execute_job
 from app.pipelines.base import BasePipeline
-from app.repository.embedding_service.base import EmbeddingRepository
+from app.repository.embedding_service.base import (
+    EmbeddingRepository,
+    EmbeddingVector,
+    SparseEmbedding,
+)
 from app.repository.models import S3Bucket, S3ObjectMetadata
 from app.repository.s3.base import StorageRepositoryBase
 from app.repository.vector.base import VectorPoint, VectorRepositoryBase
@@ -41,8 +45,14 @@ class RecordingEmbeddingRepository(EmbeddingRepository):
         self,
         texts: tuple[str, ...],
         input_type: Literal["document", "query"] = "document",
-    ) -> tuple[tuple[float, ...], ...]:
-        return tuple((1.0,) for _ in texts)
+    ) -> tuple[EmbeddingVector, ...]:
+        return tuple(
+            EmbeddingVector(
+                dense=(1.0,),
+                sparse=SparseEmbedding(indices=(1,), values=(1.0,)),
+            )
+            for _ in texts
+        )
 
     async def close(self) -> None:
         self.events.append("embedding-close")

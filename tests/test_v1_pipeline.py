@@ -14,7 +14,11 @@ from app.document_indexers.factory import UnsupportedContentTypeError
 from app.jobs.base import IndexingJobArguments
 from app.jobs.runner import execute_job
 from app.jobs.v1 import V1IndexingPipeline
-from app.repository.embedding_service.base import EmbeddingRepository
+from app.repository.embedding_service.base import (
+    EmbeddingRepository,
+    EmbeddingVector,
+    SparseEmbedding,
+)
 from app.repository.exceptions import S3ObjectNotFoundError
 from app.repository.models import S3Bucket, S3ObjectMetadata
 from app.repository.s3.base import StorageRepositoryBase
@@ -66,12 +70,18 @@ class FakeEmbeddingServiceRepository(EmbeddingRepository):
         self,
         texts: tuple[str, ...],
         input_type: Literal["document", "query"] = "document",
-    ) -> tuple[tuple[float, ...], ...]:
+    ) -> tuple[EmbeddingVector, ...]:
         self.requests.append(texts)
         self.events.append(f"embed:{input_type}:{len(texts)}")
         if self.failure is not None:
             raise self.failure
-        return tuple((0.6, 0.8) for _ in texts)
+        return tuple(
+            EmbeddingVector(
+                dense=(0.6, 0.8),
+                sparse=SparseEmbedding(indices=(7, 11), values=(1.0, 2.0)),
+            )
+            for _ in texts
+        )
 
     async def close(self) -> None:
         self.events.append("embedding-service-close")
@@ -442,7 +452,10 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
 
             await execute_job(pipeline)
 
-        self.assertEqual(pipeline.results[0].embeddings, ((0.6, 0.8),))
+        self.assertEqual(
+            pipeline.results[0].embeddings[0].dense,
+            (0.6, 0.8),
+        )
         self.assertEqual(pipeline.summary.vector_count, 1)
         self.assertIn("embed:document:1", events)
         self.assertIn("embedding-service-close", events)
@@ -454,7 +467,8 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(point.payload["object_key"], "contracts/a.pdf")
         self.assertEqual(point.payload["page_number"], 1)
         self.assertEqual(point.payload["text"], "Citation-ready contract text")
-        self.assertIsNone(point.sparse_vector)
+        self.assertEqual(point.sparse_vector.indices, (7, 11))
+        self.assertEqual(point.sparse_vector.values, (1.0, 2.0))
 
     async def test_claims_moves_downloads_and_returns_citation_chunks(self) -> None:
         events: list[str] = []

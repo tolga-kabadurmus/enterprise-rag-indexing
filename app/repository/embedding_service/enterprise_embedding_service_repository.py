@@ -6,7 +6,11 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.common.settings.embedding_service import EmbeddingServiceSettings
-from app.repository.embedding_service.base import EmbeddingRepository
+from app.repository.embedding_service.base import (
+    EmbeddingRepository,
+    EmbeddingVector,
+    SparseEmbedding,
+)
 from app.repository.embedding_service.exceptions import EmbeddingServiceRequestError
 
 
@@ -28,6 +32,8 @@ class EmbeddingResponse(BaseModel):
     dimension: int = Field(ge=1)
     normalized: bool
     embeddings: tuple[tuple[float, ...], ...]
+    sparse_model: str = Field(min_length=1)
+    sparse_embeddings: tuple[SparseEmbedding, ...]
 
 
 class EnterpriseEmbeddingServiceRepository(EmbeddingRepository):
@@ -63,7 +69,7 @@ class EnterpriseEmbeddingServiceRepository(EmbeddingRepository):
         self,
         texts: tuple[str, ...],
         input_type: Literal["document", "query"] = "document",
-    ) -> tuple[tuple[float, ...], ...]:
+    ) -> tuple[EmbeddingVector, ...]:
         """Vectorize a bounded batch and validate its model contract.
 
         Raises:
@@ -118,6 +124,11 @@ class EnterpriseEmbeddingServiceRepository(EmbeddingRepository):
                 "embedding service returned unexpected model "
                 f"{result.model!r}"
             )
+        if result.sparse_model != self._settings.expected_sparse_model:
+            raise RuntimeError(
+                "embedding service returned unexpected sparse model "
+                f"{result.sparse_model!r}"
+            )
         if result.dimension != self._settings.expected_dimension:
             raise RuntimeError(
                 "embedding service returned unexpected dimension "
@@ -126,9 +137,20 @@ class EnterpriseEmbeddingServiceRepository(EmbeddingRepository):
             )
         if len(result.embeddings) != len(texts):
             raise RuntimeError("embedding service returned the wrong vector count")
+        if len(result.sparse_embeddings) != len(texts):
+            raise RuntimeError(
+                "embedding service returned the wrong sparse vector count"
+            )
         if any(len(vector) != result.dimension for vector in result.embeddings):
             raise RuntimeError("embedding service returned a wrong vector length")
-        return result.embeddings
+        return tuple(
+            EmbeddingVector(dense=dense, sparse=sparse)
+            for dense, sparse in zip(
+                result.embeddings,
+                result.sparse_embeddings,
+                strict=True,
+            )
+        )
 
     async def close(self) -> None:
         """Close the injected client exactly once."""

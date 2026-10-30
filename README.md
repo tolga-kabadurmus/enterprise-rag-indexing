@@ -1,6 +1,6 @@
 # Enterprise RAG — Indexing
 
-`enterprise-rag-indexing` is the document ingestion and indexing component of the Enterprise RAG prototype. It runs as a **one-shot, asynchronous job**: read eligible documents from RustFS through its S3-compatible API, extract their text, split it into chunks, request embeddings from `enterprise-rag-embedding-service`, and later write vectors with source metadata to Qdrant.
+`enterprise-rag-indexing` is the document ingestion and indexing component of the Enterprise RAG prototype. It runs as a **one-shot, asynchronous job**: read eligible documents from RustFS through its S3-compatible API, extract their text, split it into chunks, request dense and sparse embeddings from `enterprise-rag-embedding-service`, and write both representations with source metadata to Qdrant.
 
 For project-wide architecture and coding conventions, see the root [`AGENTS.md`](https://github.com/tolga-kabadurmus/enterprise-rag/blob/main/AGENTS.md) in the orchestration repository. The URL assumes that repository is created under the indicated GitHub account.
 
@@ -47,9 +47,11 @@ new owner's marker.
 `PDFChunkerV1`.
 
 `PDFChunkerV1` returns page-bounded text chunks with deterministic document and
-chunk IDs plus source metadata used in Qdrant payloads. V1
-requests one vector per chunk from the shared embedding service and upserts it
-to Qdrant with deterministic IDs and citation payloads.
+chunk IDs plus source metadata used in Qdrant payloads. V1 requests one aligned
+dense/sparse embedding record per chunk from the shared embedding service and
+upserts both named vectors to Qdrant with deterministic IDs and citation
+payloads. Sparse values are token frequencies from the shared multilingual E5
+tokenizer; Qdrant applies corpus-level IDF through the sparse-vector modifier.
 Processing objects are therefore retained. The registered `mock-pdf` job remains
 side-effect-free.
 
@@ -73,8 +75,9 @@ sequenceDiagram
     Storage-->>Pipeline: Object metadata and local document
     Pipeline->>Pipeline: Extract and chunk with citation metadata
     Pipeline->>Embedding: Embed document chunks
-    Embedding-->>Pipeline: Dense vectors
-    Pipeline->>VectorDB: Upsert vectors and citation payloads
+    Embedding->>Embedding: Dense inference + sparse token frequencies
+    Embedding-->>Pipeline: Aligned dense and sparse vectors
+    Pipeline->>VectorDB: Upsert named vectors and citation payloads
     VectorDB-->>Pipeline: Upsert complete
     Pipeline->>Storage: Release claim / retain processing state
     Pipeline-->>CLI: Batch result
@@ -98,7 +101,8 @@ flowchart LR
     Pipeline --> VectorDB
     Storage --> RustFS[(RustFS / S3)]
     Embedding --> EmbeddingAPI[enterprise-rag-embedding-service]
-    VectorDB --> Qdrant[(Qdrant)]
+    EmbeddingAPI -->|dense + sparse records| Embedding
+    VectorDB -->|named dense + sparse vectors| Qdrant[(Qdrant with IDF)]
 ```
 
 ## Architectural conventions
@@ -164,11 +168,12 @@ service.
 | `EMBEDDING_SERVICE_MAX_TEXT_CHARACTERS` | `32000` | Aggregate text characters per embedding request |
 | `EMBEDDING_SERVICE_EXPECTED_MODEL` | `intfloat/multilingual-e5-small` | Response model validation |
 | `EMBEDDING_SERVICE_EXPECTED_DIMENSION` | `384` | Response vector dimension validation |
+| `EMBEDDING_SERVICE_EXPECTED_SPARSE_MODEL` | `multilingual-e5-token-frequency-v1` | Sparse encoder identity validation |
 | `VECTOR_PROVIDER` | `qdrant` | Vector implementation selected by `VectorRepositoryFactory` |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant endpoint |
 | `QDRANT_COLLECTION_NAME` | `enterprise_rag_chunks` | Chunk collection |
 | `QDRANT_DENSE_VECTOR_NAME` | `dense` | Dense named vector |
-| `QDRANT_SPARSE_VECTOR_NAME` | `sparse` | Reserved sparse named vector |
+| `QDRANT_SPARSE_VECTOR_NAME` | `sparse` | Token-frequency sparse named vector with Qdrant IDF |
 | `QDRANT_VECTOR_SIZE` | `384` | Dense vector dimension |
 | `QDRANT_BATCH_SIZE` | `64` | Points per upsert |
 
@@ -195,8 +200,8 @@ docker compose --profile dev run --rm enterprise-rag-indexing \
 
 Omit both `--object-key` and `--key-prefix` to process every source or resumable
 processing object in the selection. `v1` creates citation-ready chunks and
-requests their vectors from the embedding service in bounded batches, then
-upserts citation-ready Qdrant points. Use `python -m app.main --list-pipelines` to see
+requests their dense and sparse vectors from the embedding service in bounded
+batches, then upserts citation-ready Qdrant points. Use `python -m app.main --list-pipelines` to see
 registered workflows. `mock-pdf` remains available for a fully offline
 lifecycle check. The Dockerfile uses `dumb-init` as its entrypoint/PID 1
 mechanism, and the development service bind-mounts the local `app` package.
@@ -233,5 +238,6 @@ Use unit tests for chunking, metadata, factories, use cases, and controllers, wi
 
 **Initial target:** PDF indexing into Qdrant with traceable source metadata and basic logging/error handling. Other document formats, advanced orchestration, CI/CD, Kubernetes/OpenShift Helm charts, and observability dashboards are potential extensions, not implemented features.
 
-The current `v1` implementation ends after remote vector generation in memory;
-it must not be described as a complete Qdrant indexing pipeline.
+The current `v1` implementation persists dense and sparse vectors to Qdrant.
+Hybrid retrieval and reranking remain query-service work and are not performed
+by this disposable indexing job.

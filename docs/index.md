@@ -36,8 +36,10 @@ The repository currently provides:
   settings, safe download paths, claims, processing recovery, chunk identities,
   citations, and embedding-service startup order.
 
-The registered `v1` job extracts page-bounded chunks, requests dense vectors
-from the shared embedding service, and upserts citation-ready Qdrant points.
+The registered `v1` job extracts page-bounded chunks, requests aligned dense
+and token-frequency sparse vectors from the shared embedding service, and
+upserts citation-ready Qdrant points. Qdrant applies IDF to the named sparse
+vector so later query work can fuse lexical and semantic retrieval.
 
 ## Documentation map
 

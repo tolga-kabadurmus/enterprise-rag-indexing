@@ -54,6 +54,10 @@ class EnterpriseEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase
                     "dimension": 2,
                     "normalized": True,
                     "embeddings": [[0.6, 0.8]],
+                    "sparse_model": "multilingual-e5-token-frequency-v1",
+                    "sparse_embeddings": [
+                        {"indices": [7, 11], "values": [1.0, 2.0]}
+                    ],
                 },
             )
 
@@ -71,7 +75,9 @@ class EnterpriseEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase
 
         vectors = await repository.embed(("a document chunk",))
 
-        self.assertEqual(vectors, ((0.6, 0.8),))
+        self.assertEqual(vectors[0].dense, (0.6, 0.8))
+        self.assertEqual(vectors[0].sparse.indices, (7, 11))
+        self.assertEqual(vectors[0].sparse.values, (1.0, 2.0))
         self.assertEqual(requests[0].url.path, "/v1/embeddings")
         self.assertEqual(requests[0].content, b'{"input_type":"document","texts":["a document chunk"]}')
         await repository.close()
@@ -87,6 +93,10 @@ class EnterpriseEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase
                         "dimension": 3,
                         "normalized": True,
                         "embeddings": [[0.1, 0.2, 0.3]],
+                        "sparse_model": "multilingual-e5-token-frequency-v1",
+                        "sparse_embeddings": [
+                            {"indices": [7], "values": [1.0]}
+                        ],
                     },
                 )
             ),
@@ -111,6 +121,10 @@ class EnterpriseEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase
                         "dimension": 2,
                         "normalized": True,
                         "embeddings": [[0.6, 0.8]],
+                        "sparse_model": "multilingual-e5-token-frequency-v1",
+                        "sparse_embeddings": [
+                            {"indices": [7], "values": [1.0]}
+                        ],
                     },
                 )
             ),
@@ -123,9 +137,36 @@ class EnterpriseEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase
             ),
         )
 
-        self.assertEqual(await repository.embed(("12345",)), ((0.6, 0.8),))
+        vectors = await repository.embed(("12345",))
+        self.assertEqual(vectors[0].dense, (0.6, 0.8))
         with self.assertRaisesRegex(ValueError, "max text characters"):
             await repository.embed(("123456",))
+        await repository.close()
+
+    async def test_rejects_wrong_sparse_vector_count(self) -> None:
+        client = httpx.AsyncClient(
+            base_url="http://embedding.test",
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={
+                        "model": "intfloat/multilingual-e5-small",
+                        "dimension": 2,
+                        "normalized": True,
+                        "embeddings": [[0.6, 0.8]],
+                        "sparse_model": "multilingual-e5-token-frequency-v1",
+                        "sparse_embeddings": [],
+                    },
+                )
+            ),
+        )
+        repository = EnterpriseEmbeddingServiceRepository(
+            client,
+            EmbeddingServiceSettings(expected_dimension=2),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "wrong sparse vector count"):
+            await repository.embed(("chunk",))
         await repository.close()
 
     async def test_translates_rejected_response_with_safe_detail(self) -> None:

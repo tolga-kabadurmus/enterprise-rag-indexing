@@ -6,25 +6,31 @@ The indexing application is a one-shot job, not a long-running worker. A
 single invocation processes the requested bucket selection, reports outcomes,
 closes resources and exits.
 
-```text
-CLI selection
-    |
-    v
-V1IndexingPipeline(BasePipeline)
-    |
-    +--> S3 repository ----------> claim + verified processing move + download
-    +--> embedding repository ---> count/character-bounded batches
-                               ---> pooled HTTPX client -> embedding service
-    +--> Qdrant repository -----> dense vector + citation payload upsert
-    +--> DocumentIndexerFactory -> normalized MIME routing
-    +--> PDFDocumentIndexer -----> PDFTextExtractorV1 -> PDFChunkerV1
-                                                              |
-                                                              +--> DocumentChunk[]
+```mermaid
+flowchart TD
+    CLI[CLI selection] --> Pipeline[V1IndexingPipeline]
+    Pipeline --> Storage[S3 repository]
+    Storage -->|claim, verified move, download| RustFS[(RustFS)]
+    Pipeline --> Factory[DocumentIndexerFactory]
+    Factory --> PDF[PDFDocumentIndexer]
+    PDF --> Extract[PDFTextExtractorV1]
+    Extract --> Chunk[PDFChunkerV1]
+    Chunk -->|DocumentChunk batch| Embedding[Embedding repository]
+    Embedding -->|bounded pooled HTTP request| Service[Embedding service]
+    Service -->|dense + sparse records| Embedding
+    Embedding --> Vector[Qdrant repository]
+    Vector -->|named dense + sparse vectors<br/>citation payload| Qdrant[(Qdrant with IDF)]
 ```
 
 The CLI, job contract, runner, side-effect-free mock, S3 repository, repository
 factory, conditional processing workflow, embedded PDF text extraction, chunk
 creation, remote embedding calls, and Qdrant persistence exist today.
+
+Dense vectors use multilingual E5 inference. Sparse vectors reuse the same
+pinned tokenizer without dense-only prefixes, store positive token-frequency
+weights, and rely on Qdrant's configured sparse IDF modifier. The embedding
+repository validates that both ordered batches align before the pipeline writes
+any point.
 
 ## Implemented repository layout
 
