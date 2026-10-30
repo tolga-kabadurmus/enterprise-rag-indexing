@@ -22,8 +22,13 @@ class EmbeddingModelSettings(BaseSettings):
     )
 
     bucket: str = Field(default="models", min_length=1)
-    key_prefix: str = Field(default="embeddings", min_length=1)
-    local_directory: Path = Path("/models/embeddings")
+    key_prefix: str = Field(
+        default="embeddings/intfloat/multilingual-e5-small",
+        min_length=1,
+    )
+    local_directory: Path = Path(
+        "/models/embedding/intfloat/multilingual-e5-small"
+    )
     runtime: Literal["onnx"] = "onnx"
     model_file: Path = Path("onnx/model.onnx")
 

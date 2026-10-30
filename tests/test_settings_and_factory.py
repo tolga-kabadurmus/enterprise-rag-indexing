@@ -22,8 +22,8 @@ class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
             "S3_MAX_CONCURRENCY": "6",
             "S3_PROCESSING_BUCKET": "processing-custom",
             "EMBEDDINGS_BUCKET": "models",
-            "EMBEDDINGS_KEY_PREFIX": "embeddings",
-            "EMBEDDINGS_LOCAL_DIRECTORY": "/models/embeddings",
+            "EMBEDDINGS_KEY_PREFIX": "embeddings/intfloat/multilingual-e5-small",
+            "EMBEDDINGS_LOCAL_DIRECTORY": "/models/embedding/intfloat/multilingual-e5-small",
             "EMBEDDINGS_MODEL_FILE": "onnx/model.onnx",
             "INDEXING_WORK_DIRECTORY": "/work/custom",
             "PDF_CHUNK_SIZE": "900",
@@ -39,14 +39,19 @@ class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(s3_settings.max_concurrency, 6)
         self.assertEqual(s3_settings.processing_bucket, "processing-custom")
         self.assertEqual(embedding_settings.bucket, "models")
-        self.assertEqual(embedding_settings.key_prefix, "embeddings")
+        self.assertEqual(
+            embedding_settings.key_prefix,
+            "embeddings/intfloat/multilingual-e5-small",
+        )
         self.assertEqual(
             embedding_settings.local_directory,
-            Path("/models/embeddings"),
+            Path("/models/embedding/intfloat/multilingual-e5-small"),
         )
         self.assertEqual(
             embedding_settings.model_path,
-            Path("/models/embeddings/onnx/model.onnx"),
+            Path(
+                "/models/embedding/intfloat/multilingual-e5-small/onnx/model.onnx"
+            ),
         )
         self.assertEqual(workspace_settings.work_directory, Path("/work/custom"))
         self.assertEqual(chunking_settings.size, 900)

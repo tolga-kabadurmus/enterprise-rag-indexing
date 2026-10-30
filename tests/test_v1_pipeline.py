@@ -238,8 +238,10 @@ def build_pipeline(
         s3_settings=s3_settings,
         embedding_settings=EmbeddingModelSettings(
             bucket="models",
-            key_prefix="embeddings",
-            local_directory=Path("/models/embeddings"),
+            key_prefix="embeddings/intfloat/multilingual-e5-small",
+            local_directory=Path(
+                "/models/embedding/intfloat/multilingual-e5-small"
+            ),
             model_file=Path("onnx/model.onnx"),
         ),
         workspace_settings=IndexingWorkspaceSettings(work_directory=workspace),
@@ -289,7 +291,9 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(repository.active_claims)
 
         selection_index = events.index("head:documents:contracts/a.pdf")
-        model_index = events.index("model-sync:models:embeddings")
+        model_index = events.index(
+            "model-sync:models:embeddings/intfloat/multilingual-e5-small"
+        )
         self.assertLess(selection_index, model_index)
 
     async def test_resumes_existing_processing_object(self) -> None:

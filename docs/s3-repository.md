@@ -49,13 +49,13 @@ processing bucket, and claim TTL.
 | Variable | Local value | Meaning |
 | --- | --- | --- |
 | `EMBEDDINGS_BUCKET` | `models` | RustFS bucket containing model files |
-| `EMBEDDINGS_KEY_PREFIX` | `embeddings` | Key prefix synchronized at startup |
-| `EMBEDDINGS_LOCAL_DIRECTORY` | `/models/embeddings` | Local volume destination |
+| `EMBEDDINGS_KEY_PREFIX` | `embeddings/intfloat/multilingual-e5-small` | Key prefix synchronized at startup |
+| `EMBEDDINGS_LOCAL_DIRECTORY` | `/models/embedding/intfloat/multilingual-e5-small` | Local volume destination |
 | `EMBEDDINGS_RUNTIME` | `onnx` | Shared model runtime |
 | `EMBEDDINGS_MODEL_FILE` | `onnx/model.onnx` | Relative model artifact loaded after sync |
 
-For example, `s3://models/embeddings/onnx/model.onnx` becomes
-`/models/embeddings/onnx/model.onnx`.
+For example, `s3://models/embeddings/intfloat/multilingual-e5-small/onnx/model.onnx`
+becomes `/models/embedding/intfloat/multilingual-e5-small/onnx/model.onnx`.
 
 ## Lifecycle and current limitation
 

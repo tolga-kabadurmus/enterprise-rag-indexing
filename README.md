@@ -127,8 +127,8 @@ service.
 | `S3_PROCESSING_BUCKET` | `documents-processing` | Durable in-progress objects and conditional claims |
 | `S3_CLAIM_TTL_SECONDS` | `3600` | Age after which an abandoned claim may be reclaimed |
 | `EMBEDDINGS_BUCKET` | `models` | Bucket containing model artifacts |
-| `EMBEDDINGS_KEY_PREFIX` | `embeddings` | Model artifact key prefix |
-| `EMBEDDINGS_LOCAL_DIRECTORY` | `/models/embeddings` | Volume-backed local model directory |
+| `EMBEDDINGS_KEY_PREFIX` | `embeddings/intfloat/multilingual-e5-small` | Model artifact key prefix |
+| `EMBEDDINGS_LOCAL_DIRECTORY` | `/models/embedding/intfloat/multilingual-e5-small` | Volume-backed local model directory |
 | `EMBEDDINGS_RUNTIME` | `onnx` | Model runtime created by `RepositoryFactory` |
 | `EMBEDDINGS_MODEL_FILE` | `onnx/model.onnx` | Model artifact relative to the local directory |
 | `INDEXING_WORK_DIRECTORY` | `/work/indexing` | Ephemeral local PDF workspace |

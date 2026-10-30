@@ -95,8 +95,10 @@ class RecordingPipeline(BasePipeline):
             repository,
             EmbeddingModelSettings(
                 bucket="models",
-                key_prefix="embeddings",
-                local_directory=Path("/models/embeddings"),
+                key_prefix="embeddings/intfloat/multilingual-e5-small",
+                local_directory=Path(
+                    "/models/embedding/intfloat/multilingual-e5-small"
+                ),
             ),
         )
         self.events = events
@@ -116,7 +118,11 @@ class BasePipelineTests(unittest.IsolatedAsyncioTestCase):
         events: list[str] = []
         repository = RecordingS3Repository(
             events,
-            [Path("/models/embeddings/config.json")],
+            [
+                Path(
+                    "/models/embedding/intfloat/multilingual-e5-small/config.json"
+                )
+            ],
         )
         pipeline = RecordingPipeline(repository, events)
 
@@ -125,7 +131,7 @@ class BasePipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             events,
             [
-                "download:models:embeddings:/models/embeddings",
+                "download:models:embeddings/intfloat/multilingual-e5-small:/models/embedding/intfloat/multilingual-e5-small",
                 "pipeline-initialize",
                 "run",
                 "pipeline-close",
@@ -144,7 +150,7 @@ class BasePipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             events,
             [
-                "download:models:embeddings:/models/embeddings",
+                "download:models:embeddings/intfloat/multilingual-e5-small:/models/embedding/intfloat/multilingual-e5-small",
                 "pipeline-close",
                 "repository-close",
             ],
