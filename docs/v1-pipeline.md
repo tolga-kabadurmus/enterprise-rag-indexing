@@ -17,11 +17,13 @@
 8. extract embedded page text and create page-bounded chunks;
 9. request one vector per chunk in batches bounded by text count and aggregate
    characters;
-10. on embedding failure, copy the document to
+10. upsert deterministic chunk points to the named Qdrant `dense` vector with
+    chunk text and citation metadata;
+11. on embedding or Qdrant failure, copy the document to
     `error/<original-object-key>` in its source bucket, verify the copy, and
     delete the processing copy; and
-11. remove local temporary files and release claims. Successful processing
-    objects remain available for the later Qdrant stage.
+12. remove temporary files, release claims, and close Qdrant, HTTPX, and S3
+    clients. Successfully indexed processing objects remain durable.
 
 Discovery, claiming, and document processing use bounded batches. The pipeline
 does not create a task for every object in a large bucket.
@@ -49,7 +51,7 @@ any embedding-service request.
 
 Whole-bucket discovery excludes the source bucket's `error/` prefix so failed
 documents remain quarantined across scheduled runs. An operator can explicitly
-select `--key-prefix error/` to retry them. An embedding failure is isolated to
+select `--key-prefix error/` to retry them. An embedding or Qdrant failure is isolated to
 its document, but the completed command returns exit status `1` when any object
 failed.
 
@@ -74,9 +76,11 @@ extracts from table cells is treated as ordinary text.
 Every `DocumentChunk` contains deterministic `document_id` and `chunk_id`, the
 original source bucket/key, one-based page number, document/page chunk ordinals,
 normalized character offsets, ETag, content type, and processing location.
-This is ready to become a Qdrant point payload alongside its generated vector.
-Chunk text is never written to normal logs.
+These fields and chunk text are stored in the Qdrant payload; chunk text is
+never written to normal logs. `chunk_id` is the deterministic point ID, making
+retries idempotent.
 
-Qdrant persistence is not implemented. A `chunked` result means text chunks
-and remote vectors were produced, not that the document was persisted into the
-vector database.
+Startup validates named `dense` and `sparse` vectors and requires IDF for
+`sparse`. Points currently contain only `dense` because the embedding service
+does not yet return sparse vectors. Hybrid retrieval remains inactive until a
+real sparse encoder is implemented.

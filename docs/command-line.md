@@ -7,9 +7,8 @@ preventing arbitrary dynamic imports.
 
 !!! warning
 
-    `v1` moves claimed sources to the processing bucket, returns text chunks,
-    and requests vectors from the shared embedding service; it does not yet
-    persist Qdrant points.
+    `v1` moves claimed sources to the processing bucket, embeds text chunks,
+    and upserts them to Qdrant. It changes S3 and Qdrant state.
 
 ## Arguments
 
@@ -68,6 +67,14 @@ python -m app.main \
   --concurrency 4
 ```
 
+Inspect all objects within the pre-defined bucket:
+
+```bash
+python -m app.main \
+  --pipeline v1 \
+  --concurrency 4
+```
+
 When `--object-key` is omitted, `v1` paginates both the source selection and
 matching resumable objects in `S3_PROCESSING_BUCKET`. Missing or generic MIME
 values use a conservative `.pdf` extension fallback.
@@ -110,8 +117,8 @@ docker compose --profile dev run --rm enterprise-rag-indexing \
 
 Each registered factory receives the same `IndexingJobArguments`.
 `build_v1_pipeline()` lazily reads settings, creates one pooled HTTPX client
-using the CLI concurrency, and injects S3, embedding-service, and document-indexer
-and document-indexer dependencies only when `v1` is selected. Listing
+using the CLI concurrency, and injects S3, embedding-service, Qdrant, and
+document-indexer dependencies only when `v1` is selected. Listing
 pipelines and running `mock-pdf` therefore do not require S3 credentials.
 
 The pipeline registry chooses the top-level executable job. It does not replace

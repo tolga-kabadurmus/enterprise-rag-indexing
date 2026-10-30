@@ -36,10 +36,8 @@ The repository currently provides:
   settings, safe download paths, claims, processing recovery, chunk identities,
   citations, and embedding-service startup order.
 
-The registered `v1` job extracts embedded PDF text, returns page-bounded chunks,
-and requests vectors from the shared embedding service. Qdrant persistence is
-not implemented. A `chunked` result is never reported as successful vector
-persistence.
+The registered `v1` job extracts page-bounded chunks, requests dense vectors
+from the shared embedding service, and upserts citation-ready Qdrant points.
 
 ## Documentation map
 

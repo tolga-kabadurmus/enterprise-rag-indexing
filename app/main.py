@@ -4,12 +4,14 @@ import logging
 from collections.abc import Sequence
 
 import httpx
+from qdrant_client import AsyncQdrantClient
 
 from app.cli import run_job_cli
 from app.common.settings import (
     EmbeddingServiceSettings,
     IndexingWorkspaceSettings,
     PDFChunkingSettings,
+    QdrantSettings,
     S3Settings,
 )
 from app.common.utility.logging import configure_standard_logging
@@ -57,6 +59,7 @@ def build_v1_pipeline(arguments: IndexingJobArguments) -> AsyncIndexingJob:
     embedding_service_settings = EmbeddingServiceSettings()
     workspace_settings = IndexingWorkspaceSettings()
     pdf_chunking_settings = PDFChunkingSettings()
+    qdrant_settings = QdrantSettings()
     httpx_client = create_embedding_http_client(
         arguments,
         embedding_service_settings,
@@ -69,6 +72,18 @@ def build_v1_pipeline(arguments: IndexingJobArguments) -> AsyncIndexingJob:
         embedding_repository=RepositoryFactory.create_embedding_service(
             embedding_service_settings,
             httpx_client,
+        ),
+        qdrant_repository=RepositoryFactory.create_qdrant(
+            qdrant_settings,
+            AsyncQdrantClient(
+                url=qdrant_settings.url,
+                api_key=(
+                    qdrant_settings.api_key.get_secret_value()
+                    if qdrant_settings.api_key is not None
+                    else None
+                ),
+                timeout=qdrant_settings.timeout_seconds,
+            ),
         ),
         document_indexer_factory=DocumentIndexerFactory(
             pdf_chunking_settings=pdf_chunking_settings,
@@ -95,7 +110,7 @@ def build_pipeline_registry() -> IndexingPipelineRegistry:
             IndexingPipelineRegistration(
                 name="v1",
                 description=(
-                    "Claim S3 PDFs and return citation-ready text chunks"
+                    "Claim S3 PDFs and upsert citation-ready Qdrant points"
                 ),
                 job_factory=build_v1_pipeline,
             ),
@@ -114,9 +129,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         Process exit code from the shared indexing CLI runner.
 
     Note:
-        ``mock-pdf`` remains offline. ``v1`` returns citation-ready chunks and
-        vectors from the shared embedding service; Qdrant persistence remains
-        a later stage.
+        ``mock-pdf`` remains offline. ``v1`` embeds citation-ready chunks and
+        idempotently upserts them to Qdrant.
     """
 
     configure_standard_logging(level=logging.INFO)

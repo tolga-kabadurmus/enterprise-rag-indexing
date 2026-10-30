@@ -46,9 +46,9 @@ new owner's marker.
 `PDFChunkerV1`.
 
 `PDFChunkerV1` returns page-bounded text chunks with deterministic document and
-chunk IDs plus source metadata suitable for later Qdrant payloads. V1 now
-requests one vector per chunk from the shared embedding service and retains the
-vectors in the in-memory result. Qdrant persistence remains a later step.
+chunk IDs plus source metadata used in Qdrant payloads. V1
+requests one vector per chunk from the shared embedding service and upserts it
+to Qdrant with deterministic IDs and citation payloads.
 Processing objects are therefore retained. The registered `mock-pdf` job remains
 side-effect-free.
 
@@ -143,6 +143,12 @@ service.
 | `EMBEDDING_SERVICE_MAX_TEXT_CHARACTERS` | `32000` | Aggregate text characters per embedding request |
 | `EMBEDDING_SERVICE_EXPECTED_MODEL` | `intfloat/multilingual-e5-small` | Response model validation |
 | `EMBEDDING_SERVICE_EXPECTED_DIMENSION` | `384` | Response vector dimension validation |
+| `QDRANT_URL` | `http://qdrant:6333` | Qdrant endpoint |
+| `QDRANT_COLLECTION_NAME` | `enterprise_rag_chunks` | Chunk collection |
+| `QDRANT_DENSE_VECTOR_NAME` | `dense` | Dense named vector |
+| `QDRANT_SPARSE_VECTOR_NAME` | `sparse` | Reserved sparse named vector |
+| `QDRANT_VECTOR_SIZE` | `384` | Dense vector dimension |
+| `QDRANT_BATCH_SIZE` | `64` | Points per upsert |
 
 The S3, model-artifact, embedding-service, workspace, and PDF chunking groups use separate Pydantic
 `BaseSettings` classes under `app/common/settings`. Never log credentials.
@@ -167,9 +173,8 @@ docker compose --profile dev run --rm enterprise-rag-indexing \
 
 Omit both `--object-key` and `--key-prefix` to process every source or resumable
 processing object in the selection. `v1` creates citation-ready chunks and
-requests their vectors from the embedding service in batches bounded by both
-text count and aggregate character count, but does not persist Qdrant
-points yet. Use `python -m app.main --list-pipelines` to see
+requests their vectors from the embedding service in bounded batches, then
+upserts citation-ready Qdrant points. Use `python -m app.main --list-pipelines` to see
 registered workflows. `mock-pdf` remains available for a fully offline
 lifecycle check. The Dockerfile uses `dumb-init` as its entrypoint/PID 1
 mechanism, and the development service bind-mounts the local `app` package.
@@ -182,9 +187,9 @@ When remote embedding fails, `v1` copies the durable processing object to
 `error/<original-object-key>` in the selected source bucket, verifies its size,
 and only then deletes the processing copy. Unprefixed bucket discovery skips
 the `error/` quarantine; operators may select that prefix explicitly.
-An empty bucket/prefix selection is a successful no-op and skips embedding
-requests. Indexing always closes the shared embedding-service HTTP client during
-job cleanup, including after failures.
+An empty bucket/prefix selection is a successful no-op and skips embedding and
+Qdrant requests. Cleanup closes Qdrant, HTTPX, and S3 clients, including after
+failures.
 
 Check the root project's README for cloning submodules and stopping the stack. This indexing container is a disposable job; it should not run as a persistent daemon.
 

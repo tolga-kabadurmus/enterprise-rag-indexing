@@ -6,6 +6,7 @@ import logging
 from app.jobs.base import AsyncIndexingJob, IndexingJobArguments
 from app.repository.s3.base import S3Repository
 from app.repository.embedding_service.base import EmbeddingRepository
+from app.repository.qdrant.base import QdrantRepository
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class BasePipeline(AsyncIndexingJob):
         arguments: Validated source selection and concurrency settings.
         s3_repository: Initialized S3 infrastructure adapter.
         embedding_repository: Shared embedding-service adapter.
+        qdrant_repository: Asynchronous vector persistence adapter.
     """
 
     def __init__(
@@ -30,10 +32,12 @@ class BasePipeline(AsyncIndexingJob):
         arguments: IndexingJobArguments,
         s3_repository: S3Repository,
         embedding_repository: EmbeddingRepository,
+        qdrant_repository: QdrantRepository,
     ) -> None:
         super().__init__(arguments)
         self.s3_repository = s3_repository
         self.embedding_repository = embedding_repository
+        self.qdrant_repository = qdrant_repository
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -57,7 +61,9 @@ class BasePipeline(AsyncIndexingJob):
         return True
 
     async def initialize_pipeline_resources(self) -> None:
-        """Optionally initialize pipeline-specific resources."""
+        """Validate the vector collection before processing documents."""
+
+        await self.qdrant_repository.ensure_collection()
 
     @abstractmethod
     async def run(self) -> None:
@@ -74,6 +80,9 @@ class BasePipeline(AsyncIndexingJob):
         finally:
             self._initialized = False
             try:
-                await self.embedding_repository.close()
+                await self.qdrant_repository.close()
             finally:
-                await self.s3_repository.close()
+                try:
+                    await self.embedding_repository.close()
+                finally:
+                    await self.s3_repository.close()

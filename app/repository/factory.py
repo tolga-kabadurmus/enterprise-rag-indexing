@@ -1,15 +1,19 @@
 """Factory for infrastructure repository implementations."""
 
 import httpx
+from qdrant_client import AsyncQdrantClient
 
 from app.common.settings.embedding_service import EmbeddingServiceSettings
 from app.common.settings.s3 import S3Settings
+from app.common.settings.qdrant import QdrantSettings
 from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.embedding_service.httpx_repository import (
     HttpxEmbeddingServiceRepository,
 )
 from app.repository.s3.base import S3Repository
 from app.repository.s3.boto3_repository import Boto3S3Repository
+from app.repository.qdrant.async_repository import AsyncQdrantRepository
+from app.repository.qdrant.base import QdrantRepository
 
 
 class RepositoryFactory:
@@ -48,3 +52,12 @@ class RepositoryFactory:
             "unsupported embedding service provider: "
             f"{settings.provider}"
         )
+
+    @staticmethod
+    def create_qdrant(
+        settings: QdrantSettings,
+        client: AsyncQdrantClient,
+    ) -> QdrantRepository:
+        """Create the asynchronous Qdrant persistence adapter."""
+
+        return AsyncQdrantRepository(client, settings)

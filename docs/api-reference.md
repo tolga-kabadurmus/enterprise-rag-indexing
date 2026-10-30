@@ -54,6 +54,10 @@ The reference below is generated from the checked-in Python docstrings.
     options:
       members: true
 
+::: app.common.settings.qdrant
+    options:
+      members: true
+
 ::: app.common.settings.indexing
     options:
       members: true
@@ -83,6 +87,16 @@ The reference below is generated from the checked-in Python docstrings.
       members: true
 
 ::: app.repository.embedding_service.httpx_repository
+    options:
+      members: true
+
+## Qdrant repository
+
+::: app.repository.qdrant.base
+    options:
+      members: true
+
+::: app.repository.qdrant.async_repository
     options:
       members: true
 

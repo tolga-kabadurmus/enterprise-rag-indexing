@@ -8,6 +8,21 @@ from app.pipelines.base import BasePipeline
 from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.models import S3Bucket, S3ObjectMetadata
 from app.repository.s3.base import S3Repository
+from app.repository.qdrant.base import QdrantRepository, VectorPoint
+
+
+class RecordingQdrantRepository(QdrantRepository):
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    async def ensure_collection(self) -> None:
+        self.events.append("qdrant-ensure")
+
+    async def upsert_points(self, points: tuple[VectorPoint, ...]) -> None:
+        self.events.append(f"qdrant-upsert:{len(points)}")
+
+    async def close(self) -> None:
+        self.events.append("qdrant-close")
 
 
 class RecordingEmbeddingRepository(EmbeddingRepository):
@@ -77,6 +92,7 @@ class RecordingPipeline(BasePipeline):
             IndexingJobArguments(source_bucket="documents"),
             RecordingS3Repository(events),
             RecordingEmbeddingRepository(events),
+            RecordingQdrantRepository(events),
         )
         self.events = events
         self.fail = fail
@@ -94,13 +110,13 @@ class BasePipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_closes_embedding_http_repository_after_success(self) -> None:
         events: list[str] = []
         await execute_job(RecordingPipeline(events))
-        self.assertEqual(events, ["run", "pipeline-close", "embedding-close", "s3-close"])
+        self.assertEqual(events, ["qdrant-ensure", "run", "pipeline-close", "qdrant-close", "embedding-close", "s3-close"])
 
     async def test_closes_embedding_http_repository_after_failure(self) -> None:
         events: list[str] = []
         with self.assertRaisesRegex(RuntimeError, "indexing failed"):
             await execute_job(RecordingPipeline(events, fail=True))
-        self.assertEqual(events, ["run", "pipeline-close", "embedding-close", "s3-close"])
+        self.assertEqual(events, ["qdrant-ensure", "run", "pipeline-close", "qdrant-close", "embedding-close", "s3-close"])
 
 
 if __name__ == "__main__":

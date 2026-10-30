@@ -15,6 +15,7 @@ V1IndexingPipeline(BasePipeline)
     +--> S3 repository ----------> claim + verified processing move + download
     +--> embedding repository ---> count/character-bounded batches
                                ---> pooled HTTPX client -> embedding service
+    +--> Qdrant repository -----> dense vector + citation payload upsert
     +--> DocumentIndexerFactory -> normalized MIME routing
     +--> PDFDocumentIndexer -----> PDFTextExtractorV1 -> PDFChunkerV1
                                                               |
@@ -23,8 +24,7 @@ V1IndexingPipeline(BasePipeline)
 
 The CLI, job contract, runner, side-effect-free mock, S3 repository, repository
 factory, conditional processing workflow, embedded PDF text extraction, chunk
-creation, and remote embedding calls exist today. Qdrant persistence remains
-planned.
+creation, remote embedding calls, and Qdrant persistence exist today.
 
 ## Implemented repository layout
 
@@ -32,7 +32,7 @@ planned.
 app/
 ├── chunkers/           # PDFChunkerV1 and chunking result contract
 ├── common/
-│   ├── settings/       # grouped Pydantic settings, including embedding service
+│   ├── settings/       # grouped Pydantic settings, including Qdrant
 │   └── utility/        # safe object-key-to-path conversion
 ├── document_indexers/  # MIME-selected document processing boundary
 ├── document_extractors/# local text extraction and ExtractedPage models
@@ -43,6 +43,7 @@ app/
     ├── factory.py      # infrastructure provider selection
     ├── models.py       # Pydantic bucket/object records
     ├── embedding_service/ # HTTPX embedding-service adapter
+    ├── qdrant/         # async named-vector persistence adapter
     └── s3/             # S3 contract and boto3 implementation
 ```
 
@@ -77,8 +78,8 @@ A controller coordinates multiple use cases for the full document pipeline.
 The composition layer creates repositories, use cases, the controller and the
 concrete job; business methods must not construct infrastructure clients.
 
-`RepositoryFactory` creates the RustFS-compatible S3 adapter and the default
-HTTPX embedding-service adapter. `DocumentIndexerFactory` separately selects a document implementation
+`RepositoryFactory` creates the RustFS-compatible S3, HTTPX embedding-service,
+and async Qdrant adapters. `DocumentIndexerFactory` separately selects a document implementation
 from normalized content type. It maps `application/pdf` to a
 `PDFDocumentIndexer` composed with `PDFTextExtractorV1` and `PDFChunkerV1`;
 unsupported types are reported and skipped per object. Indexing startup creates
@@ -108,5 +109,5 @@ claim marker selects one job before movement. The processing copy is verified
 before source deletion, and deterministic processing keys support recovery.
 Claims are leases rather than transactions: a hard termination leaves a marker
 until its TTL, and an incorrectly short TTL can allow overlap. Deterministic IDs
-will support idempotent Qdrant upserts, but stale-vector replacement still needs
-to be defined with the future persistence repository.
+make Qdrant retries idempotent. Removing stale points when a changed document
+produces fewer chunks remains a known limitation.

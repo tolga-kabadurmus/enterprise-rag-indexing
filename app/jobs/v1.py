@@ -33,6 +33,7 @@ from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.exceptions import S3ObjectNotFoundError
 from app.repository.models import S3ObjectMetadata
 from app.repository.s3.base import S3Repository
+from app.repository.qdrant.base import QdrantRepository, VectorPoint
 
 LOGGER = logging.getLogger(__name__)
 
@@ -109,10 +110,10 @@ class V1IndexingPipeline(BasePipeline):
     """Claim, stage, extract, and chunk selected PDFs with bounded concurrency.
 
     Source objects are copied into the configured processing bucket and the
-    source is deleted only after the durable copy's size is verified. Processing
-    objects remain in that bucket because Qdrant persistence is a later stage.
-    A conditional S3 claim prevents concurrent jobs from working on the same
-    source identity during one attempt.
+    source is deleted only after the durable copy's size is verified. Chunk
+    vectors are persisted to Qdrant with citation metadata. A conditional S3
+    claim prevents concurrent jobs from working on the same source identity
+    during one attempt.
     """
 
     def __init__(
@@ -123,11 +124,13 @@ class V1IndexingPipeline(BasePipeline):
         workspace_settings: IndexingWorkspaceSettings,
         document_indexer_factory: DocumentIndexerFactory,
         embedding_repository: EmbeddingRepository,
+        qdrant_repository: QdrantRepository,
     ) -> None:
         super().__init__(
             arguments,
             s3_repository,
             embedding_repository=embedding_repository,
+            qdrant_repository=qdrant_repository,
         )
         self.s3_settings = s3_settings
         self.workspace_settings = workspace_settings
@@ -457,18 +460,20 @@ class V1IndexingPipeline(BasePipeline):
                         )
                     )
                 embeddings: tuple[tuple[float, ...], ...] = ()
-                if (
-                    self.embedding_repository is not None
-                    and indexing_result.chunks
-                ):
+                if indexing_result.chunks:
                     try:
                         embeddings = await self._embed_chunks(
                             indexing_result.chunks
                         )
-                    except Exception as embedding_error:
+                        await self._upsert_chunks(
+                            indexing_result.chunks,
+                            embeddings,
+                        )
+                    except Exception as persistence_error:
                         error_metadata = await self._move_to_error_prefix(document)
                         LOGGER.exception(
-                            "embedding failed; moved document to error prefix "
+                            "vectorization or Qdrant upsert failed; moved "
+                            "document to error prefix "
                             "source_bucket=%s object_key=%s error_object_key=%s",
                             document.source_metadata.bucket,
                             document.source_metadata.key,
@@ -478,8 +483,8 @@ class V1IndexingPipeline(BasePipeline):
                             document.source_metadata,
                             error_metadata,
                             "failed",
-                            str(embedding_error)
-                            or type(embedding_error).__name__,
+                            str(persistence_error)
+                            or type(persistence_error).__name__,
                             started_at,
                             normalized_content_type,
                             indexing_result.chunks,
@@ -580,6 +585,40 @@ class V1IndexingPipeline(BasePipeline):
                 )
             )
         return tuple(vectors)
+
+    async def _upsert_chunks(
+        self,
+        chunks: tuple[DocumentChunk, ...],
+        embeddings: tuple[tuple[float, ...], ...],
+    ) -> None:
+        """Persist aligned vectors with complete retrieval and citation payloads."""
+
+        if len(chunks) != len(embeddings):
+            raise RuntimeError("cannot persist unaligned chunks and embeddings")
+        points = tuple(
+            VectorPoint(
+                point_id=chunk.chunk_id,
+                dense_vector=vector,
+                payload={
+                    "text": chunk.text,
+                    "document_id": chunk.document_id,
+                    "chunk_id": chunk.chunk_id,
+                    "source_bucket": chunk.source_bucket,
+                    "object_key": chunk.object_key,
+                    "page_number": chunk.page_number,
+                    "chunk_index": chunk.chunk_index,
+                    "page_chunk_index": chunk.page_chunk_index,
+                    "character_start": chunk.character_start,
+                    "character_end": chunk.character_end,
+                    "content_type": chunk.content_type,
+                    "etag": chunk.etag,
+                    "processing_bucket": chunk.processing_bucket,
+                    "processing_object_key": chunk.processing_object_key,
+                },
+            )
+            for chunk, vector in zip(chunks, embeddings, strict=True)
+        )
+        await self.qdrant_repository.upsert_points(points)
 
     async def _move_to_error_prefix(
         self,
