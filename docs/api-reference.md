@@ -50,7 +50,7 @@ The reference below is generated from the checked-in Python docstrings.
     options:
       members: true
 
-::: app.common.settings.embeddings
+::: app.common.settings.embedding_service
     options:
       members: true
 
@@ -76,13 +76,13 @@ The reference below is generated from the checked-in Python docstrings.
     options:
       members: true
 
-## Embedding model repository
+## Embedding service repository
 
-::: app.repository.embedding.base
+::: app.repository.embedding_service.base
     options:
       members: true
 
-::: app.repository.embedding.onnx_repository
+::: app.repository.embedding_service.httpx_repository
     options:
       members: true
 

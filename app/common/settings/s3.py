@@ -34,3 +34,4 @@ class S3Settings(BaseSettings):
         min_length=1,
     )
     claim_ttl_seconds: int = Field(default=3600, ge=60)
+    source_bucket: str = Field(default="documents", min_length=1)

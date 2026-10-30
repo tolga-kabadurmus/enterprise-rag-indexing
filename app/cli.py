@@ -44,11 +44,15 @@ class IndexingCommandArguments(BaseModel):
         return self
 
 
-def build_parser(pipeline_names: Sequence[str]) -> argparse.ArgumentParser:
+def build_parser(
+    pipeline_names: Sequence[str],
+    default_source_bucket: str = "documents",
+) -> argparse.ArgumentParser:
     """Build the indexing command-line parser.
 
     Args:
         pipeline_names: Names accepted by the ``--pipeline`` argument.
+        default_source_bucket: Bucket used when ``--source-bucket`` is omitted.
 
     Returns:
         Parser for pipeline selection, bucket, key selection, and concurrency.
@@ -69,7 +73,11 @@ def build_parser(pipeline_names: Sequence[str]) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--source-bucket",
-        help="S3 bucket containing the source documents.",
+        default=default_source_bucket,
+        help=(
+            "S3 bucket containing source documents "
+            f"(default: {default_source_bucket})."
+        ),
     )
 
     selector = parser.add_mutually_exclusive_group()
@@ -94,6 +102,7 @@ def build_parser(pipeline_names: Sequence[str]) -> argparse.ArgumentParser:
 def parse_command_arguments(
     pipeline_names: Sequence[str],
     argv: Sequence[str] | None = None,
+    default_source_bucket: str = "documents",
 ) -> IndexingCommandArguments:
     """Parse and validate pipeline selection and indexing arguments.
 
@@ -101,6 +110,7 @@ def parse_command_arguments(
         pipeline_names: Names that may be passed to ``--pipeline``.
         argv: Arguments without the executable name. Uses `sys.argv` when
             omitted.
+        default_source_bucket: Bucket used when the CLI argument is omitted.
 
     Returns:
         Pipeline selection and validated arguments for a concrete job.
@@ -109,7 +119,7 @@ def parse_command_arguments(
         SystemExit: If required arguments are missing or validation fails.
     """
 
-    parser = build_parser(pipeline_names)
+    parser = build_parser(pipeline_names, default_source_bucket)
     namespace = parser.parse_args(argv)
     if namespace.list_pipelines:
         if namespace.pipeline is not None:
@@ -122,9 +132,6 @@ def parse_command_arguments(
 
     if namespace.pipeline is None:
         parser.error("--pipeline is required unless --list-pipelines is used")
-    if namespace.source_bucket is None:
-        parser.error("--source-bucket is required unless --list-pipelines is used")
-
     try:
         return IndexingCommandArguments(
             pipeline=namespace.pipeline,
@@ -142,6 +149,7 @@ def parse_command_arguments(
 def run_job_cli(
     pipeline_registry: IndexingPipelineRegistry,
     argv: Sequence[str] | None = None,
+    default_source_bucket: str = "documents",
 ) -> int:
     """Parse arguments and execute the selected registered pipeline.
 
@@ -149,13 +157,18 @@ def run_job_cli(
         pipeline_registry: Implemented pipeline factories available to users.
         argv: Arguments without the executable name. Uses `sys.argv` when
             omitted.
+        default_source_bucket: Bucket used when the CLI argument is omitted.
 
     Returns:
         Process exit code: `0` for success, `1` for failure, or `130` when
         interrupted by the user.
     """
 
-    command = parse_command_arguments(pipeline_registry.names, argv)
+    command = parse_command_arguments(
+        pipeline_registry.names,
+        argv,
+        default_source_bucket,
+    )
     if command.list_pipelines:
         for registration in pipeline_registry.registrations:
             print(f"{registration.name}\t{registration.description}")
@@ -177,7 +190,9 @@ def run_job_cli(
 
     try:
         job_factory = pipeline_registry.resolve(command.pipeline)
-        asyncio.run(execute_job_from_factory(job_factory, arguments))
+        completed_job = asyncio.run(
+            execute_job_from_factory(job_factory, arguments)
+        )
     except KeyboardInterrupt:
         LOGGER.warning("indexing job interrupted")
         return 130
@@ -194,6 +209,16 @@ def run_job_cli(
             "indexing job failed pipeline=%s bucket=%s",
             command.pipeline,
             arguments.source_bucket,
+        )
+        return 1
+
+    if completed_job.failed_count:
+        LOGGER.error(
+            "indexing job completed with object failures pipeline=%s "
+            "bucket=%s failed=%d",
+            command.pipeline,
+            arguments.source_bucket,
+            completed_job.failed_count,
         )
         return 1
 

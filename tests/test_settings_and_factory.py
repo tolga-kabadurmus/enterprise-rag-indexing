@@ -4,12 +4,10 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.common.settings.embeddings import EmbeddingModelSettings
 from app.common.settings.indexing import IndexingWorkspaceSettings
 from app.common.settings.pdf_chunking import PDFChunkingSettings
 from app.common.settings.s3 import S3Settings
 from app.repository.factory import RepositoryFactory
-from app.repository.embedding.onnx_repository import OnnxEmbeddingModelRepository
 from app.repository.s3.boto3_repository import Boto3S3Repository
 
 
@@ -21,10 +19,7 @@ class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
             "S3_SECRET_KEY": "secret",
             "S3_MAX_CONCURRENCY": "6",
             "S3_PROCESSING_BUCKET": "processing-custom",
-            "EMBEDDINGS_BUCKET": "models",
-            "EMBEDDINGS_KEY_PREFIX": "embeddings/intfloat/multilingual-e5-small",
-            "EMBEDDINGS_LOCAL_DIRECTORY": "/models/embedding/intfloat/multilingual-e5-small",
-            "EMBEDDINGS_MODEL_FILE": "onnx/model.onnx",
+            "S3_SOURCE_BUCKET": "source-documents",
             "INDEXING_WORK_DIRECTORY": "/work/custom",
             "PDF_CHUNK_SIZE": "900",
             "PDF_CHUNK_OVERLAP": "100",
@@ -32,27 +27,12 @@ class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.dict("os.environ", environment, clear=True):
             s3_settings = S3Settings()
-            embedding_settings = EmbeddingModelSettings()
             workspace_settings = IndexingWorkspaceSettings()
             chunking_settings = PDFChunkingSettings()
 
         self.assertEqual(s3_settings.max_concurrency, 6)
         self.assertEqual(s3_settings.processing_bucket, "processing-custom")
-        self.assertEqual(embedding_settings.bucket, "models")
-        self.assertEqual(
-            embedding_settings.key_prefix,
-            "embeddings/intfloat/multilingual-e5-small",
-        )
-        self.assertEqual(
-            embedding_settings.local_directory,
-            Path("/models/embedding/intfloat/multilingual-e5-small"),
-        )
-        self.assertEqual(
-            embedding_settings.model_path,
-            Path(
-                "/models/embedding/intfloat/multilingual-e5-small/onnx/model.onnx"
-            ),
-        )
+        self.assertEqual(s3_settings.source_bucket, "source-documents")
         self.assertEqual(workspace_settings.work_directory, Path("/work/custom"))
         self.assertEqual(chunking_settings.size, 900)
         self.assertEqual(chunking_settings.overlap, 100)
@@ -86,32 +66,6 @@ class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
     def test_workspace_settings_require_absolute_directory(self) -> None:
         with self.assertRaises(ValidationError):
             IndexingWorkspaceSettings(work_directory=Path("work/indexing"))
-
-    def test_embedding_settings_are_configurable(self) -> None:
-        settings = EmbeddingModelSettings(
-            bucket="custom-models",
-            key_prefix="releases/e5",
-            local_directory=Path("/models/e5"),
-        )
-
-        self.assertEqual(settings.bucket, "custom-models")
-        self.assertEqual(settings.key_prefix, "releases/e5")
-        self.assertEqual(settings.local_directory, Path("/models/e5"))
-
-    def test_embedding_settings_require_absolute_local_directory(self) -> None:
-        with self.assertRaises(ValidationError):
-            EmbeddingModelSettings(local_directory=Path("models/e5"))
-
-    def test_embedding_settings_reject_unsafe_model_file(self) -> None:
-        with self.assertRaises(ValidationError):
-            EmbeddingModelSettings(model_file=Path("../model.onnx"))
-
-    def test_factory_creates_onnx_embedding_model_repository(self) -> None:
-        repository = RepositoryFactory.create_embedding_model(
-            EmbeddingModelSettings()
-        )
-
-        self.assertIsInstance(repository, OnnxEmbeddingModelRepository)
 
     async def test_factory_creates_rustfs_compatible_boto_repository(self) -> None:
         settings = S3Settings(

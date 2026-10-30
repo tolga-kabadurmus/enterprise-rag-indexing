@@ -1,6 +1,6 @@
 # Enterprise RAG — Indexing
 
-`enterprise-rag-indexing` is the document ingestion and indexing component of the Enterprise RAG prototype. It runs as a **one-shot, asynchronous job**: read eligible documents from RustFS through its S3-compatible API, extract their text, split it into chunks, generate embeddings, and write vectors with source metadata to Qdrant.
+`enterprise-rag-indexing` is the document ingestion and indexing component of the Enterprise RAG prototype. It runs as a **one-shot, asynchronous job**: read eligible documents from RustFS through its S3-compatible API, extract their text, split it into chunks, request embeddings from `enterprise-rag-embedding-service`, and later write vectors with source metadata to Qdrant.
 
 For project-wide architecture and coding conventions, see the root [`AGENTS.md`](https://github.com/tolga-kabadurmus/enterprise-rag/blob/main/AGENTS.md) in the orchestration repository. The URL assumes that repository is created under the indicated GitHub account.
 
@@ -36,8 +36,8 @@ lifecycle.
 
 `BasePipeline` is the ancestor for real/versioned pipelines. The registered
 `v1` pipeline first discovers an exact object or every selected bucket object.
-Only after successful, non-empty discovery does it download the configured
-embedding artifacts and load the ONNX model once. Before model startup it uses
+After successful discovery it uses a shared, pooled HTTPX client to call the
+embedding service. Before processing it uses
 a conditional claim, copies selected objects into the configurable processing
 bucket, verifies the durable copy, and only then deletes the source object.
 Claim release verifies its owner and ETag so an older attempt cannot delete a
@@ -46,9 +46,11 @@ new owner's marker.
 `PDFChunkerV1`.
 
 `PDFChunkerV1` returns page-bounded text chunks with deterministic document and
-chunk IDs plus source metadata suitable for later Qdrant payloads. Embedding
-inference and Qdrant persistence remain later steps. Processing objects are
-therefore retained. The registered `mock-pdf` job remains side-effect-free.
+chunk IDs plus source metadata suitable for later Qdrant payloads. V1 now
+requests one vector per chunk from the shared embedding service and retains the
+vectors in the in-memory result. Qdrant persistence remains a later step.
+Processing objects are therefore retained. The registered `mock-pdf` job remains
+side-effect-free.
 
 ## Conceptual processing flow
 
@@ -69,7 +71,7 @@ RustFS source bucket (+ optional prefix)
       Document chunks
             |
             v
-   Embedding generation
+   Embedding service (pooled HTTPX)
             |
             v
  Qdrant vectors + metadata
@@ -126,22 +128,29 @@ service.
 | `S3_MAX_CONCURRENCY` | `4` | Maximum simultaneous blocking boto3 calls |
 | `S3_PROCESSING_BUCKET` | `documents-processing` | Durable in-progress objects and conditional claims |
 | `S3_CLAIM_TTL_SECONDS` | `3600` | Age after which an abandoned claim may be reclaimed |
-| `EMBEDDINGS_BUCKET` | `models` | Bucket containing model artifacts |
-| `EMBEDDINGS_KEY_PREFIX` | `embeddings/intfloat/multilingual-e5-small` | Model artifact key prefix |
-| `EMBEDDINGS_LOCAL_DIRECTORY` | `/models/embedding/intfloat/multilingual-e5-small` | Volume-backed local model directory |
-| `EMBEDDINGS_RUNTIME` | `onnx` | Model runtime created by `RepositoryFactory` |
-| `EMBEDDINGS_MODEL_FILE` | `onnx/model.onnx` | Model artifact relative to the local directory |
+| `S3_SOURCE_BUCKET` | `documents` | Default source bucket when `--source-bucket` is omitted |
 | `INDEXING_WORK_DIRECTORY` | `/work/indexing` | Ephemeral local PDF workspace |
 | `PDF_CHUNK_SIZE` | `1200` | Maximum normalized characters per chunk |
 | `PDF_CHUNK_OVERLAP` | `200` | Character overlap between adjacent page chunks |
+| `EMBEDDING_SERVICE_PROVIDER` | `httpx` | Provider selected by `RepositoryFactory` |
+| `EMBEDDING_SERVICE_URL` | `http://enterprise-rag-embedding-service:8081` | Shared embedding API base URL |
+| `EMBEDDING_SERVICE_API_PATH` | `/v1/embeddings` | Embedding API path |
+| `EMBEDDING_SERVICE_TIMEOUT_SECONDS` | `60` | Per-request HTTP timeout |
+| `EMBEDDING_SERVICE_VERIFY_TLS` | `false` locally | TLS certificate verification |
+| `EMBEDDING_SERVICE_MAX_CONNECTIONS` | `4` | Upper bound for the HTTP pool |
+| `EMBEDDING_SERVICE_MAX_KEEPALIVE_CONNECTIONS` | `4` | Keep-alive connections in the HTTP pool |
+| `EMBEDDING_SERVICE_MAX_BATCH_SIZE` | `32` | Chunk texts per embedding request |
+| `EMBEDDING_SERVICE_MAX_TEXT_CHARACTERS` | `32000` | Aggregate text characters per embedding request |
+| `EMBEDDING_SERVICE_EXPECTED_MODEL` | `intfloat/multilingual-e5-small` | Response model validation |
+| `EMBEDDING_SERVICE_EXPECTED_DIMENSION` | `384` | Response vector dimension validation |
 
-The S3, embedding, workspace, and PDF chunking groups use separate Pydantic
+The S3, model-artifact, embedding-service, workspace, and PDF chunking groups use separate Pydantic
 `BaseSettings` classes under `app/common/settings`. Never log credentials.
 
 The source-document bucket and optional key prefix are **runtime CLI
-arguments** rather than hard-coded settings. The embedding-model bucket and
-prefix are application environment settings because every real pipeline needs
-them during startup.
+arguments**. `--source-bucket` overrides `S3_SOURCE_BUCKET`; when the
+argument is omitted, the configured `documents` default is used. The embedding-service endpoint,
+pool limits, and response contract are application environment settings.
 
 ## Running with Docker Compose
 
@@ -157,16 +166,25 @@ docker compose --profile dev run --rm enterprise-rag-indexing \
 ```
 
 Omit both `--object-key` and `--key-prefix` to process every source or resumable
-processing object in the selection. `v1` creates chunks but not embeddings or
-vectors. Use `python -m app.main --list-pipelines` to see
+processing object in the selection. `v1` creates citation-ready chunks and
+requests their vectors from the embedding service in batches bounded by both
+text count and aggregate character count, but does not persist Qdrant
+points yet. Use `python -m app.main --list-pipelines` to see
 registered workflows. `mock-pdf` remains available for a fully offline
 lifecycle check. The Dockerfile uses `dumb-init` as its entrypoint/PID 1
 mechanism, and the development service bind-mounts the local `app` package.
 
 A missing exact `--object-key` is reported as a concise repository-level error
 and exits with status `1`, allowing Kubernetes or Argo to mark the run failed.
-An empty bucket/prefix selection is a successful no-op and skips model download
-and loading.
+Any per-object processing failure also produces exit status `1` after the
+remaining selected objects complete.
+When remote embedding fails, `v1` copies the durable processing object to
+`error/<original-object-key>` in the selected source bucket, verifies its size,
+and only then deletes the processing copy. Unprefixed bucket discovery skips
+the `error/` quarantine; operators may select that prefix explicitly.
+An empty bucket/prefix selection is a successful no-op and skips embedding
+requests. Indexing always closes the shared embedding-service HTTP client during
+job cleanup, including after failures.
 
 Check the root project's README for cloning submodules and stopping the stack. This indexing container is a disposable job; it should not run as a persistent daemon.
 
@@ -188,5 +206,5 @@ Use unit tests for chunking, metadata, factories, use cases, and controllers, wi
 
 **Initial target:** PDF indexing into Qdrant with traceable source metadata and basic logging/error handling. Other document formats, advanced orchestration, CI/CD, Kubernetes/OpenShift Helm charts, and observability dashboards are potential extensions, not implemented features.
 
-The current `v1` implementation ends after text chunk creation. It must not be
-described as a complete embedding or Qdrant indexing pipeline.
+The current `v1` implementation ends after remote vector generation in memory;
+it must not be described as a complete Qdrant indexing pipeline.

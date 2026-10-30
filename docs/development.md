@@ -28,7 +28,7 @@ explicit RustFS and Qdrant configuration.
 
 The runtime requirements explicitly pin both `pydantic` and
 `pydantic-settings`. Data records that cross application boundaries use frozen
-Pydantic models. S3 and embedding artifact configuration use separate
+Pydantic models. S3, embedding-service, and inactive local-model configuration use separate
 `BaseSettings` classes under `app/common/settings`.
 
 The existing virtualenv must have runtime and documentation dependencies
@@ -63,9 +63,10 @@ rebuilding. Rebuild the image after changing `requirements.txt` or the
 Dockerfile.
 
 The service reads `dev-envs/enterprise-rag-indexing.env` from the root
-orchestration repository and mounts the `embedding-models` named volume at
-`/models`. It also mounts `indexing-work` at `/work/indexing`. The latter is an
-ephemeral workspace: the application creates one directory per document and
+orchestration repository and mounts `indexing-work` at `/work/indexing`. The
+embedding service is reached over the Compose network. Indexing closes its
+pooled HTTP client after both successful and failed jobs. The workspace is an
+ephemeral directory: the application creates one directory per document and
 removes it after the attempt. It is not durable processing storage.
 
 Kubernetes should mount an `emptyDir` volume at the same `/work/indexing` path

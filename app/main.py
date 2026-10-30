@@ -3,9 +3,11 @@
 import logging
 from collections.abc import Sequence
 
+import httpx
+
 from app.cli import run_job_cli
 from app.common.settings import (
-    EmbeddingModelSettings,
+    EmbeddingServiceSettings,
     IndexingWorkspaceSettings,
     PDFChunkingSettings,
     S3Settings,
@@ -22,21 +24,51 @@ from app.jobs.v1 import V1IndexingPipeline
 from app.repository.factory import RepositoryFactory
 
 
+def create_embedding_http_client(
+    arguments: IndexingJobArguments,
+    settings: EmbeddingServiceSettings,
+) -> httpx.AsyncClient:
+    """Create the job-wide HTTP client with concurrency-bounded pooling.
+
+    The pool never exceeds either the CLI document concurrency or the
+    environment-configured safety limit. The caller transfers ownership to the
+    embedding repository, which closes the client during pipeline cleanup.
+    """
+
+    max_connections = min(arguments.concurrency, settings.max_connections)
+    return httpx.AsyncClient(
+        base_url=settings.url,
+        timeout=httpx.Timeout(settings.timeout_seconds),
+        limits=httpx.Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=min(
+                max_connections,
+                settings.max_keepalive_connections,
+            ),
+        ),
+        verify=settings.verify_tls,
+    )
+
+
 def build_v1_pipeline(arguments: IndexingJobArguments) -> AsyncIndexingJob:
     """Compose a v1 pipeline only when the registry selects it."""
 
     s3_settings = S3Settings()
-    embedding_settings = EmbeddingModelSettings()
+    embedding_service_settings = EmbeddingServiceSettings()
     workspace_settings = IndexingWorkspaceSettings()
     pdf_chunking_settings = PDFChunkingSettings()
+    httpx_client = create_embedding_http_client(
+        arguments,
+        embedding_service_settings,
+    )
     return V1IndexingPipeline(
         arguments=arguments,
         s3_repository=RepositoryFactory.create_s3(s3_settings),
         s3_settings=s3_settings,
-        embedding_settings=embedding_settings,
         workspace_settings=workspace_settings,
-        embedding_model_repository=RepositoryFactory.create_embedding_model(
-            embedding_settings
+        embedding_repository=RepositoryFactory.create_embedding_service(
+            embedding_service_settings,
+            httpx_client,
         ),
         document_indexer_factory=DocumentIndexerFactory(
             pdf_chunking_settings=pdf_chunking_settings,
@@ -82,13 +114,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         Process exit code from the shared indexing CLI runner.
 
     Note:
-        ``mock-pdf`` remains offline. ``v1`` returns text chunks with citation
-        metadata, but embedding inference and vector persistence remain later
-        stages.
+        ``mock-pdf`` remains offline. ``v1`` returns citation-ready chunks and
+        vectors from the shared embedding service; Qdrant persistence remains
+        a later stage.
     """
 
     configure_standard_logging(level=logging.INFO)
-    return run_job_cli(build_pipeline_registry(), argv)
+    s3_settings = S3Settings()
+    return run_job_cli(
+        build_pipeline_registry(),
+        argv,
+        default_source_bucket=s3_settings.source_bucket,
+    )
 
 
 if __name__ == "__main__":

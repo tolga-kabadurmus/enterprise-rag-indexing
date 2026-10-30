@@ -1,9 +1,13 @@
 """Factory for infrastructure repository implementations."""
 
-from app.common.settings.embeddings import EmbeddingModelSettings
+import httpx
+
+from app.common.settings.embedding_service import EmbeddingServiceSettings
 from app.common.settings.s3 import S3Settings
-from app.repository.embedding.base import EmbeddingModelRepository
-from app.repository.embedding.onnx_repository import OnnxEmbeddingModelRepository
+from app.repository.embedding_service.base import EmbeddingRepository
+from app.repository.embedding_service.httpx_repository import (
+    HttpxEmbeddingServiceRepository,
+)
 from app.repository.s3.base import S3Repository
 from app.repository.s3.boto3_repository import Boto3S3Repository
 
@@ -27,13 +31,20 @@ class RepositoryFactory:
         raise ValueError(f"unsupported S3 provider: {settings.provider}")
 
     @staticmethod
-    def create_embedding_model(
-        settings: EmbeddingModelSettings,
-    ) -> EmbeddingModelRepository:
-        """Create the configured local embedding model runtime adapter."""
+    def create_embedding_service(
+        settings: EmbeddingServiceSettings,
+        httpx_client: httpx.AsyncClient,
+    ) -> EmbeddingRepository:
+        """Create the configured embedding provider.
 
-        if settings.runtime == "onnx":
-            return OnnxEmbeddingModelRepository()
+        The default and currently supported provider is HTTPX. The client is
+        deliberately supplied by application startup so its connection pool
+        can be shared by all concurrently processed documents.
+        """
+
+        if settings.provider == "httpx":
+            return HttpxEmbeddingServiceRepository(httpx_client, settings)
         raise ValueError(
-            f"unsupported embedding model runtime: {settings.runtime}"
+            "unsupported embedding service provider: "
+            f"{settings.provider}"
         )

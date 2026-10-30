@@ -15,7 +15,8 @@ The repository currently provides:
 - a runnable offline mock PDF indexing job with bounded async concurrency,
   deterministic identifiers, and structured lifecycle logging;
 - a registered `v1` pipeline that conditionally claims and moves source
-  objects, loads one ONNX model, and processes bounded selections;
+  objects, calls the shared embedding service through a pooled HTTPX client,
+  and processes bounded selections;
 - MIME normalization, `DocumentIndexerFactory`, embedded PDF text extraction,
   and citation-ready `PDFChunkerV1` output;
 - stdout logging for normal processing and stderr logging for errors;
@@ -25,19 +26,20 @@ The repository currently provides:
 - a provider-neutral S3 repository contract and RustFS-compatible boto3
   adapter for bucket listing, pagination, claims, verified moves, downloads,
   and object metadata;
-- grouped Pydantic settings for S3 access and embedding model artifact
-  locations;
-- a `BasePipeline` startup contract that synchronizes embedding model files to
-  a volume before real pipeline-specific initialization;
+- grouped Pydantic settings for S3 access, embedding-service access, and model
+  artifact locations;
+- a `BasePipeline` startup contract that prepares the selected work before
+  remote embedding requests;
 - pinned libraries for RustFS/S3, PDF extraction and rendering, RapidOCR, and
   Qdrant;
 - unit tests for command parsing, job cleanup, S3 behavior, factory routing,
   settings, safe download paths, claims, processing recovery, chunk identities,
-  citations, and model synchronization order.
+  citations, and embedding-service startup order.
 
-The registered `v1` job extracts embedded PDF text and returns page-bounded
-chunks. OCR, embedding inference, and Qdrant persistence are not implemented.
-A `chunked` result is never reported as successful vector indexing.
+The registered `v1` job extracts embedded PDF text, returns page-bounded chunks,
+and requests vectors from the shared embedding service. Qdrant persistence is
+not implemented. A `chunked` result is never reported as successful vector
+persistence.
 
 ## Documentation map
 

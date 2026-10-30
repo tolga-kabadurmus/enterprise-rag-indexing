@@ -59,6 +59,12 @@ class AsyncIndexingJob(ABC):
     def __init__(self, arguments: IndexingJobArguments) -> None:
         self.arguments = arguments
 
+    @property
+    def failed_count(self) -> int:
+        """Return failed work items after execution, if the job tracks them."""
+
+        return 0
+
     async def __aenter__(self) -> "AsyncIndexingJob":
         """Initialize the job and return it as an async context manager.
 

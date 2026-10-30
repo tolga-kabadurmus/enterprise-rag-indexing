@@ -71,11 +71,10 @@ methods enforce this order:
 discover and validate source selection
     -> conditionally claim and move/resume processing objects
     -> stop successfully if no work was claimed
-    -> download configured embedding artifacts
-    -> load one shared ONNX model
+    -> create one pooled HTTPX embedding client at composition startup
     -> download temporary PDF, extract text, and chunk once
     -> clean local files and release claims
-    -> release ONNX model
+    -> close the shared HTTPX client
     -> close S3 repository
 ```
 
@@ -85,7 +84,8 @@ uses a semaphore around per-object work. One metadata failure produces a
 failed object result without cancelling other objects. Exact-key selection
 failures fail the job because there is no remaining selection to process.
 They are translated to `S3ObjectNotFoundError`, logged without an SDK
-traceback, and produce process exit status `1` before model initialization.
+traceback, and produce process exit status `1` before any embedding-service
+request.
 
 The registered `mock-pdf` job intentionally inherits `AsyncIndexingJob`
 directly so the diagnostic run stays offline.

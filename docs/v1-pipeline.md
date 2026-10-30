@@ -10,13 +10,18 @@
 3. acquire a conditional claim for each source identity;
 4. copy new sources to the processing bucket, verify their size, then delete
    the source copy;
-5. skip model initialization when the selection is empty or every claim was
+5. skip embedding-service initialization when the selection is empty or every claim was
    won by another job;
-6. synchronize and load the configured ONNX embedding model;
+6. use the injected pooled HTTPX embedding repository;
 7. download each claimed processing PDF into the ephemeral workspace;
 8. extract embedded page text and create page-bounded chunks;
-9. remove local temporary files and release claims; and
-10. retain processing objects for the later embedding/Qdrant stage.
+9. request one vector per chunk in batches bounded by text count and aggregate
+   characters;
+10. on embedding failure, copy the document to
+    `error/<original-object-key>` in its source bucket, verify the copy, and
+    delete the processing copy; and
+11. remove local temporary files and release claims. Successful processing
+    objects remain available for the later Qdrant stage.
 
 Discovery, claiming, and document processing use bounded batches. The pipeline
 does not create a task for every object in a large bucket.
@@ -40,7 +45,13 @@ a value longer than the expected job duration.
 
 An exact key missing from both source and processing raises
 `S3ObjectNotFoundError`, logs a concise stderr record, and exits `1` before
-model synchronization.
+any embedding-service request.
+
+Whole-bucket discovery excludes the source bucket's `error/` prefix so failed
+documents remain quarantined across scheduled runs. An operator can explicitly
+select `--key-prefix error/` to retry them. An embedding failure is isolated to
+its document, but the completed command returns exit status `1` when any object
+failed.
 
 ## Text extraction and chunking
 
@@ -63,9 +74,9 @@ extracts from table cells is treated as ordinary text.
 Every `DocumentChunk` contains deterministic `document_id` and `chunk_id`, the
 original source bucket/key, one-based page number, document/page chunk ordinals,
 normalized character offsets, ETag, content type, and processing location.
-This is ready to become a Qdrant point payload after an embedding vector is
-generated. Chunk text is never written to normal logs.
+This is ready to become a Qdrant point payload alongside its generated vector.
+Chunk text is never written to normal logs.
 
-Embedding inference and Qdrant persistence are not implemented. A `chunked`
-result means text chunks were produced, not that the document was indexed into
-the vector database.
+Qdrant persistence is not implemented. A `chunked` result means text chunks
+and remote vectors were produced, not that the document was persisted into the
+vector database.

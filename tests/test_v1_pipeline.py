@@ -3,39 +3,58 @@ from datetime import UTC, datetime
 from pathlib import Path
 import tempfile
 import unittest
+from typing import Literal
 
 from app.chunkers.base import DocumentChunk
-from app.common.settings.embeddings import EmbeddingModelSettings
 from app.common.settings.indexing import IndexingWorkspaceSettings
 from app.common.settings.s3 import S3Settings
-from app.common.utility.processing_keys import processing_object_key
+from app.common.utility.processing_keys import error_object_key, processing_object_key
 from app.document_indexers.base import DocumentIndexingResult, LocalDocument
 from app.document_indexers.factory import UnsupportedContentTypeError
 from app.jobs.base import IndexingJobArguments
 from app.jobs.runner import execute_job
 from app.jobs.v1 import V1IndexingPipeline
-from app.repository.embedding.base import EmbeddingModelRepository
+from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.exceptions import S3ObjectNotFoundError
 from app.repository.models import S3Bucket, S3ObjectMetadata
 from app.repository.s3.base import S3Repository
 
 
-class FakeEmbeddingModelRepository(EmbeddingModelRepository):
-    def __init__(self, events: list[str]) -> None:
+class FakeEmbeddingServiceRepository(EmbeddingRepository):
+    def __init__(
+        self,
+        events: list[str],
+        max_batch_size: int = 1,
+        max_text_characters: int = 32_000,
+        failure: Exception | None = None,
+    ) -> None:
         self.events = events
-        self._loaded = False
+        self._max_batch_size = max_batch_size
+        self._max_text_characters = max_text_characters
+        self.requests: list[tuple[str, ...]] = []
+        self.failure = failure
 
     @property
-    def is_loaded(self) -> bool:
-        return self._loaded
+    def max_batch_size(self) -> int:
+        return self._max_batch_size
 
-    async def load(self, model_path: Path) -> None:
-        self.events.append(f"model-load:{model_path}")
-        self._loaded = True
+    @property
+    def max_text_characters(self) -> int:
+        return self._max_text_characters
+
+    async def embed(
+        self,
+        texts: tuple[str, ...],
+        input_type: Literal["document", "query"] = "document",
+    ) -> tuple[tuple[float, ...], ...]:
+        self.requests.append(texts)
+        self.events.append(f"embed:{input_type}:{len(texts)}")
+        if self.failure is not None:
+            raise self.failure
+        return tuple((0.6, 0.8) for _ in texts)
 
     async def close(self) -> None:
-        self.events.append("model-close")
-        self._loaded = False
+        self.events.append("embedding-service-close")
 
 
 class FakeS3Repository(S3Repository):
@@ -152,8 +171,7 @@ class FakeS3Repository(S3Repository):
         key_prefix: str,
         destination_directory: Path,
     ) -> list[Path]:
-        self.events.append(f"model-sync:{bucket}:{key_prefix}")
-        return [destination_directory / "onnx/model.onnx"]
+        raise AssertionError("indexing must not download embedding model artifacts")
 
     async def close(self) -> None:
         self.events.append("s3-close")
@@ -225,6 +243,7 @@ def build_pipeline(
     repository: FakeS3Repository,
     events: list[str],
     workspace: Path,
+    embedding_repository: EmbeddingRepository | None = None,
 ) -> V1IndexingPipeline:
     s3_settings = S3Settings(
         endpoint_url="http://rustfs:9000",
@@ -236,21 +255,174 @@ def build_pipeline(
         arguments=arguments,
         s3_repository=repository,
         s3_settings=s3_settings,
-        embedding_settings=EmbeddingModelSettings(
-            bucket="models",
-            key_prefix="embeddings/intfloat/multilingual-e5-small",
-            local_directory=Path(
-                "/models/embedding/intfloat/multilingual-e5-small"
-            ),
-            model_file=Path("onnx/model.onnx"),
-        ),
         workspace_settings=IndexingWorkspaceSettings(work_directory=workspace),
-        embedding_model_repository=FakeEmbeddingModelRepository(events),
+        embedding_repository=embedding_repository
+        or FakeEmbeddingServiceRepository(events),
         document_indexer_factory=FakeDocumentIndexerFactory(events),
     )
 
 
 class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
+    def test_error_object_key_does_not_nest_on_explicit_retry(self) -> None:
+        self.assertEqual(
+            error_object_key("error/contracts/a.pdf"),
+            "error/contracts/a.pdf",
+        )
+
+    async def test_embedding_failure_moves_processing_object_to_error_prefix(
+        self,
+    ) -> None:
+        events: list[str] = []
+        source = metadata("documents", "contracts/a.pdf")
+        repository = FakeS3Repository(
+            {("documents", "contracts/a.pdf"): source},
+            events,
+        )
+        embedding_repository = FakeEmbeddingServiceRepository(
+            events,
+            failure=RuntimeError("embedding unavailable"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            pipeline = build_pipeline(
+                IndexingJobArguments(
+                    source_bucket="documents",
+                    object_key="contracts/a.pdf",
+                ),
+                repository,
+                events,
+                Path(directory),
+                embedding_repository,
+            )
+
+            await execute_job(pipeline)
+
+        processing_key = processing_object_key(
+            "documents",
+            "contracts/a.pdf",
+        )
+        self.assertEqual(pipeline.summary.failed, 1)
+        self.assertEqual(pipeline.results[0].detail, "embedding unavailable")
+        self.assertNotIn(
+            ("documents-processing", processing_key),
+            repository.objects,
+        )
+        self.assertIn(
+            ("documents", "error/contracts/a.pdf"),
+            repository.objects,
+        )
+        self.assertFalse(repository.active_claims)
+
+    async def test_default_discovery_skips_error_prefix(self) -> None:
+        events: list[str] = []
+        error_document = metadata("documents", "error/contracts/a.pdf")
+        repository = FakeS3Repository(
+            {("documents", "error/contracts/a.pdf"): error_document},
+            events,
+        )
+        embedding_repository = FakeEmbeddingServiceRepository(events)
+        with tempfile.TemporaryDirectory() as directory:
+            pipeline = build_pipeline(
+                IndexingJobArguments(source_bucket="documents"),
+                repository,
+                events,
+                Path(directory),
+                embedding_repository,
+            )
+
+            await execute_job(pipeline)
+
+        self.assertEqual(pipeline.summary.discovered, 0)
+        self.assertEqual(embedding_repository.requests, [])
+
+    async def test_embedding_batches_respect_count_and_character_limits(self) -> None:
+        events: list[str] = []
+        repository = FakeS3Repository({}, events)
+        embedding_repository = FakeEmbeddingServiceRepository(
+            events,
+            max_batch_size=3,
+            max_text_characters=5,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            pipeline = build_pipeline(
+                IndexingJobArguments(source_bucket="documents"),
+                repository,
+                events,
+                Path(directory),
+                embedding_repository,
+            )
+            template = DocumentChunk(
+                document_id="document-id",
+                chunk_id="chunk-0",
+                text="123",
+                source_bucket="documents",
+                object_key="a.pdf",
+                page_number=1,
+                chunk_index=0,
+                page_chunk_index=0,
+                character_start=0,
+                character_end=3,
+                content_type="application/pdf",
+                etag="etag",
+                processing_bucket="documents-processing",
+                processing_object_key="objects/documents/a.pdf",
+            )
+            chunks = (
+                template,
+                template.model_copy(
+                    update={
+                        "chunk_id": "chunk-1",
+                        "text": "45",
+                        "chunk_index": 1,
+                        "page_chunk_index": 1,
+                        "character_end": 2,
+                    }
+                ),
+                template.model_copy(
+                    update={
+                        "chunk_id": "chunk-2",
+                        "text": "678",
+                        "chunk_index": 2,
+                        "page_chunk_index": 2,
+                    }
+                ),
+            )
+
+            vectors = await pipeline._embed_chunks(chunks)
+            await embedding_repository.close()
+
+        self.assertEqual(len(vectors), 3)
+        self.assertEqual(
+            embedding_repository.requests,
+            [("123", "45"), ("678",)],
+        )
+
+    async def test_uses_remote_embedding_repository_without_local_model(self) -> None:
+        events: list[str] = []
+        source = metadata("documents", "contracts/a.pdf")
+        repository = FakeS3Repository(
+            {("documents", "contracts/a.pdf"): source},
+            events,
+        )
+        embedding_repository = FakeEmbeddingServiceRepository(events)
+        with tempfile.TemporaryDirectory() as directory:
+            pipeline = build_pipeline(
+                IndexingJobArguments(
+                    source_bucket="documents",
+                    object_key="contracts/a.pdf",
+                ),
+                repository,
+                events,
+                Path(directory),
+                embedding_repository,
+            )
+
+            await execute_job(pipeline)
+
+        self.assertEqual(pipeline.results[0].embeddings, ((0.6, 0.8),))
+        self.assertEqual(pipeline.summary.vector_count, 1)
+        self.assertIn("embed:document:1", events)
+        self.assertIn("embedding-service-close", events)
+
     async def test_claims_moves_downloads_and_returns_citation_chunks(self) -> None:
         events: list[str] = []
         source = metadata("documents", "contracts/a.pdf")
@@ -290,11 +462,7 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(list(Path(directory).iterdir()), [])
             self.assertFalse(repository.active_claims)
 
-        selection_index = events.index("head:documents:contracts/a.pdf")
-        model_index = events.index(
-            "model-sync:models:embeddings/intfloat/multilingual-e5-small"
-        )
-        self.assertLess(selection_index, model_index)
+        self.assertIn("embedding-service-close", events)
 
     async def test_resumes_existing_processing_object(self) -> None:
         events: list[str] = []
@@ -349,7 +517,7 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pipeline.results[0].chunks[0].etag, "original-etag")
 
-    async def test_missing_exact_key_fails_before_model_initialization(self) -> None:
+    async def test_missing_exact_key_closes_embedding_service(self) -> None:
         events: list[str] = []
         repository = FakeS3Repository({}, events)
         with tempfile.TemporaryDirectory() as directory:
@@ -369,10 +537,9 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
             ):
                 await execute_job(pipeline)
 
-        self.assertFalse(any(event.startswith("model-sync:") for event in events))
-        self.assertEqual(events[-2:], ["model-close", "s3-close"])
+        self.assertEqual(events[-2:], ["embedding-service-close", "s3-close"])
 
-    async def test_empty_selection_skips_model_initialization(self) -> None:
+    async def test_empty_selection_skips_embedding_requests(self) -> None:
         events: list[str] = []
         repository = FakeS3Repository({}, events)
         with tempfile.TemporaryDirectory() as directory:
@@ -386,9 +553,10 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
             await execute_job(pipeline)
 
         self.assertEqual(pipeline.summary.discovered, 0)
-        self.assertFalse(any(event.startswith("model-sync:") for event in events))
+        self.assertFalse(any(event.startswith("embed:") for event in events))
+        self.assertIn("embedding-service-close", events)
 
-    async def test_lost_claim_is_reported_without_loading_model(self) -> None:
+    async def test_lost_claim_is_reported_without_embedding_request(self) -> None:
         events: list[str] = []
         source = metadata("documents", "a.pdf")
         repository = FakeS3Repository(
@@ -410,7 +578,8 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
             await execute_job(pipeline)
 
         self.assertEqual(pipeline.summary.claimed_elsewhere, 1)
-        self.assertFalse(any(event.startswith("model-sync:") for event in events))
+        self.assertFalse(any(event.startswith("embed:") for event in events))
+        self.assertIn("embedding-service-close", events)
 
 
 if __name__ == "__main__":

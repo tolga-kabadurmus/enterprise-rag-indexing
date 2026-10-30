@@ -38,40 +38,28 @@ unrelated or stale local files.
 
 `S3Settings` reads `S3_*` variables and holds the endpoint, credentials,
 region, addressing style, TLS verification, provider, concurrency limit,
-processing bucket, and claim TTL.
+source bucket, processing bucket, and claim TTL.
 
 | Variable | Local value | Meaning |
 | --- | --- | --- |
+| `S3_SOURCE_BUCKET` | `documents` | Default document bucket when the CLI override is omitted |
 | `S3_PROCESSING_BUCKET` | `documents-processing` | Durable processing objects and claim markers |
 | `S3_CLAIM_TTL_SECONDS` | `3600` | Abandoned-claim recovery timeout |
-`EmbeddingModelSettings` separately reads:
-
-| Variable | Local value | Meaning |
-| --- | --- | --- |
-| `EMBEDDINGS_BUCKET` | `models` | RustFS bucket containing model files |
-| `EMBEDDINGS_KEY_PREFIX` | `embeddings/intfloat/multilingual-e5-small` | Key prefix synchronized at startup |
-| `EMBEDDINGS_LOCAL_DIRECTORY` | `/models/embedding/intfloat/multilingual-e5-small` | Local volume destination |
-| `EMBEDDINGS_RUNTIME` | `onnx` | Shared model runtime |
-| `EMBEDDINGS_MODEL_FILE` | `onnx/model.onnx` | Relative model artifact loaded after sync |
-
-For example, `s3://models/embeddings/intfloat/multilingual-e5-small/onnx/model.onnx`
-becomes `/models/embedding/intfloat/multilingual-e5-small/onnx/model.onnx`.
 
 ## Lifecycle and current limitation
 
 `BasePipeline.initialize()` first calls the concrete pipeline's preparation
 hook. `V1IndexingPipeline` uses it for discovery, conditional claims, and
 verified movement to the processing bucket. A missing exact source and
-processing object therefore fails before model synchronization, while an empty
-or fully claimed selection skips model initialization as a successful no-op.
-For a non-empty selection, the base synchronizes the configured model prefix
-and v1 loads one `onnxruntime.InferenceSession` from `EMBEDDINGS_MODEL_FILE`.
-Cleanup releases the model reference and closes S3 even after initialization
-or run failures. An empty model prefix or missing model file fails startup.
+processing object therefore fails before any embedding-service request, while
+an empty or fully claimed selection skips remote vectorization as a successful
+no-op. For a non-empty selection, the composition layer injects one pooled
+HTTPX embedding repository. Cleanup closes that client and S3 even after
+initialization or run failures.
 
 The boto3 adapter maps `404`, `NoSuchKey`, and `NotFound` responses for exact
 object metadata/download operations to the provider-neutral
 `S3ObjectNotFoundError`, retaining the SDK exception as its chained cause.
 
-Embedding inference is not implemented yet; loading the model currently
-validates the shared runtime lifecycle for the upcoming embedding step.
+Indexing does not download or load embedding models. The dedicated embedding
+service exclusively owns model artifacts and inference.

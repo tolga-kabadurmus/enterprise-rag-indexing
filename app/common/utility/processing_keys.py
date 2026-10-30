@@ -6,6 +6,26 @@ from urllib.parse import quote, unquote
 
 PROCESSING_OBJECT_ROOT = "objects"
 CLAIM_ROOT = "claims"
+ERROR_OBJECT_ROOT = "error"
+
+
+def error_object_key(object_key: str) -> str:
+    """Return the quarantined key for a failed source document."""
+
+    normalized_key = object_key.strip().lstrip("/")
+    if not normalized_key:
+        raise ValueError("object_key must not be blank")
+    if is_error_object_key(normalized_key):
+        return normalized_key
+    return f"{ERROR_OBJECT_ROOT}/{normalized_key}"
+
+
+def is_error_object_key(object_key: str) -> bool:
+    """Return whether an object belongs to the error quarantine prefix."""
+
+    return object_key == ERROR_OBJECT_ROOT or object_key.startswith(
+        f"{ERROR_OBJECT_ROOT}/"
+    )
 
 
 def processing_object_key(source_bucket: str, object_key: str) -> str:

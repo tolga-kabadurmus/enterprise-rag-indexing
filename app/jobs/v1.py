@@ -8,15 +8,16 @@ from tempfile import TemporaryDirectory
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.chunkers.base import DocumentChunk
-from app.common.settings.embeddings import EmbeddingModelSettings
 from app.common.settings.indexing import IndexingWorkspaceSettings
 from app.common.settings.s3 import S3Settings
 from app.common.utility.mime import normalize_content_type
 from app.common.utility.processing_keys import (
     claim_object_key,
+    error_object_key,
+    is_error_object_key,
     original_key_from_processing_key,
     processing_object_key,
     processing_object_prefix,
@@ -28,7 +29,7 @@ from app.document_indexers.factory import (
 )
 from app.jobs.base import IndexingJobArguments
 from app.pipelines.base import BasePipeline
-from app.repository.embedding.base import EmbeddingModelRepository
+from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.exceptions import S3ObjectNotFoundError
 from app.repository.models import S3ObjectMetadata
 from app.repository.s3.base import S3Repository
@@ -74,8 +75,17 @@ class ObjectProcessingResult(BaseModel):
     ]
     normalized_content_type: str | None = None
     chunks: tuple[DocumentChunk, ...] = ()
+    embeddings: tuple[tuple[float, ...], ...] = ()
     detail: str = Field(min_length=1)
     elapsed_seconds: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_embedding_alignment(self) -> "ObjectProcessingResult":
+        """Keep generated vectors positionally aligned with chunk metadata."""
+
+        if self.embeddings and len(self.embeddings) != len(self.chunks):
+            raise ValueError("embeddings must align one-to-one with chunks")
+        return self
 
 
 class V1BatchSummary(BaseModel):
@@ -91,6 +101,7 @@ class V1BatchSummary(BaseModel):
     failed: int = Field(ge=0)
     claimed_elsewhere: int = Field(ge=0)
     chunk_count: int = Field(ge=0)
+    vector_count: int = Field(ge=0)
     elapsed_seconds: float = Field(ge=0)
 
 
@@ -99,9 +110,9 @@ class V1IndexingPipeline(BasePipeline):
 
     Source objects are copied into the configured processing bucket and the
     source is deleted only after the durable copy's size is verified. Processing
-    objects remain in that bucket because embedding and Qdrant persistence are
-    later stages. A conditional S3 claim prevents concurrent jobs from working
-    on the same source identity during one attempt.
+    objects remain in that bucket because Qdrant persistence is a later stage.
+    A conditional S3 claim prevents concurrent jobs from working on the same
+    source identity during one attempt.
     """
 
     def __init__(
@@ -109,15 +120,17 @@ class V1IndexingPipeline(BasePipeline):
         arguments: IndexingJobArguments,
         s3_repository: S3Repository,
         s3_settings: S3Settings,
-        embedding_settings: EmbeddingModelSettings,
         workspace_settings: IndexingWorkspaceSettings,
-        embedding_model_repository: EmbeddingModelRepository,
         document_indexer_factory: DocumentIndexerFactory,
+        embedding_repository: EmbeddingRepository,
     ) -> None:
-        super().__init__(arguments, s3_repository, embedding_settings)
+        super().__init__(
+            arguments,
+            s3_repository,
+            embedding_repository=embedding_repository,
+        )
         self.s3_settings = s3_settings
         self.workspace_settings = workspace_settings
-        self.embedding_model_repository = embedding_model_repository
         self.document_indexer_factory = document_indexer_factory
         self.results: list[ObjectProcessingResult] = []
         self.summary: V1BatchSummary | None = None
@@ -125,6 +138,12 @@ class V1IndexingPipeline(BasePipeline):
         self._active_claims: set[str] = set()
         self._discovered_count = 0
         self._claim_owner = str(uuid4())
+
+    @property
+    def failed_count(self) -> int:
+        """Return the number of objects that failed during the latest run."""
+
+        return self.summary.failed if self.summary is not None else 0
 
     async def prepare_pipeline(self) -> bool:
         """Discover, claim, and move work before expensive model startup."""
@@ -156,23 +175,11 @@ class V1IndexingPipeline(BasePipeline):
 
         return bool(self._prepared_documents)
 
-    async def initialize_pipeline_resources(self) -> None:
-        """Load the configured embedding model once after artifacts sync."""
-
-        await self.embedding_model_repository.load(
-            self.embedding_settings.model_path
-        )
-
     async def run(self) -> None:
         """Download and text-chunk each claimed processing object once."""
 
         if not self._initialized:
             raise RuntimeError("v1 indexing pipeline has not been initialized")
-        if (
-            self._prepared_documents
-            and not self.embedding_model_repository.is_loaded
-        ):
-            raise RuntimeError("embedding model is not loaded")
 
         started_at = asyncio.get_running_loop().time()
         semaphore = asyncio.Semaphore(self.arguments.concurrency)
@@ -207,12 +214,13 @@ class V1IndexingPipeline(BasePipeline):
                 item.status == "claimed_elsewhere" for item in self.results
             ),
             chunk_count=sum(len(item.chunks) for item in self.results),
+            vector_count=sum(len(item.embeddings) for item in self.results),
             elapsed_seconds=elapsed_seconds,
         )
         LOGGER.info(
             "v1 indexing batch completed bucket=%s discovered=%d processed=%d "
             "chunked=%d empty=%d unsupported=%d failed=%d "
-            "claimed_elsewhere=%d chunks=%d elapsed_seconds=%.3f",
+            "claimed_elsewhere=%d chunks=%d vectors=%d elapsed_seconds=%.3f",
             self.arguments.source_bucket,
             self.summary.discovered,
             self.summary.processed,
@@ -222,25 +230,23 @@ class V1IndexingPipeline(BasePipeline):
             self.summary.failed,
             self.summary.claimed_elsewhere,
             self.summary.chunk_count,
+            self.summary.vector_count,
             self.summary.elapsed_seconds,
         )
 
     async def close_pipeline_resources(self) -> None:
         """Release model resources and every claim surviving partial startup."""
 
-        try:
-            await self.embedding_model_repository.close()
-        finally:
-            release_errors: list[Exception] = []
-            for claim_key in tuple(self._active_claims):
-                try:
-                    await self._release_claim(claim_key)
-                except Exception as error:
-                    release_errors.append(error)
-            if release_errors:
-                raise RuntimeError(
-                    f"failed to release {len(release_errors)} S3 claims"
-                ) from release_errors[0]
+        release_errors: list[Exception] = []
+        for claim_key in tuple(self._active_claims):
+            try:
+                await self._release_claim(claim_key)
+            except Exception as error:
+                release_errors.append(error)
+        if release_errors:
+            raise RuntimeError(
+                f"failed to release {len(release_errors)} S3 claims"
+            ) from release_errors[0]
 
     async def _select_objects(self) -> list[SelectedDocument]:
         if self.arguments.object_key is not None:
@@ -274,6 +280,8 @@ class V1IndexingPipeline(BasePipeline):
                 source_exists=False,
             )
         for source in source_objects:
+            if self.arguments.key_prefix is None and is_error_object_key(source.key):
+                continue
             existing = selected.get(source.key)
             selected[source.key] = SelectedDocument(
                 source_metadata=source,
@@ -448,13 +456,42 @@ class V1IndexingPipeline(BasePipeline):
                             local_path=local_path,
                         )
                     )
+                embeddings: tuple[tuple[float, ...], ...] = ()
+                if (
+                    self.embedding_repository is not None
+                    and indexing_result.chunks
+                ):
+                    try:
+                        embeddings = await self._embed_chunks(
+                            indexing_result.chunks
+                        )
+                    except Exception as embedding_error:
+                        error_metadata = await self._move_to_error_prefix(document)
+                        LOGGER.exception(
+                            "embedding failed; moved document to error prefix "
+                            "source_bucket=%s object_key=%s error_object_key=%s",
+                            document.source_metadata.bucket,
+                            document.source_metadata.key,
+                            error_metadata.key,
+                        )
+                        return self._result(
+                            document.source_metadata,
+                            error_metadata,
+                            "failed",
+                            str(embedding_error)
+                            or type(embedding_error).__name__,
+                            started_at,
+                            normalized_content_type,
+                            indexing_result.chunks,
+                        )
                 LOGGER.info(
-                    "PDF text chunking completed bucket=%s object_key=%s "
-                    "status=%s chunks=%d elapsed_seconds=%.3f",
+                    "PDF processing completed bucket=%s object_key=%s "
+                    "status=%s chunks=%d vectors=%d elapsed_seconds=%.3f",
                     document.source_metadata.bucket,
                     document.source_metadata.key,
                     indexing_result.status,
                     indexing_result.chunk_count,
+                    len(embeddings),
                     asyncio.get_running_loop().time() - started_at,
                 )
                 return self._result(
@@ -465,6 +502,7 @@ class V1IndexingPipeline(BasePipeline):
                     started_at,
                     normalized_content_type,
                     indexing_result.chunks,
+                    embeddings,
                 )
             except UnsupportedContentTypeError as error:
                 LOGGER.warning(
@@ -501,6 +539,80 @@ class V1IndexingPipeline(BasePipeline):
                     document.claim_key,
                     suppress_errors=True,
                 )
+
+    async def _embed_chunks(
+        self,
+        chunks: tuple[DocumentChunk, ...],
+    ) -> tuple[tuple[float, ...], ...]:
+        """Vectorize chunks in bounded batches through the shared service."""
+
+        batch_size = self.embedding_repository.max_batch_size
+        max_text_characters = self.embedding_repository.max_text_characters
+        vectors: list[tuple[float, ...]] = []
+        batch: list[DocumentChunk] = []
+        batch_characters = 0
+        for chunk in chunks:
+            chunk_characters = len(chunk.text)
+            if chunk_characters > max_text_characters:
+                raise ValueError(
+                    f"chunk {chunk.chunk_id} exceeds embedding request character "
+                    f"limit ({max_text_characters})"
+                )
+            if batch and (
+                len(batch) >= batch_size
+                or batch_characters + chunk_characters > max_text_characters
+            ):
+                vectors.extend(
+                    await self.embedding_repository.embed(
+                        tuple(item.text for item in batch),
+                        input_type="document",
+                    )
+                )
+                batch = []
+                batch_characters = 0
+            batch.append(chunk)
+            batch_characters += chunk_characters
+        if batch:
+            vectors.extend(
+                await self.embedding_repository.embed(
+                    tuple(item.text for item in batch),
+                    input_type="document",
+                )
+            )
+        return tuple(vectors)
+
+    async def _move_to_error_prefix(
+        self,
+        document: PreparedDocument,
+    ) -> S3ObjectMetadata:
+        """Quarantine a processing object after embedding failure.
+
+        S3 movement is copy-then-delete. The processing copy is deleted only
+        after the error-prefix copy has been created and its size verified.
+        If either operation fails, the exception propagates and the durable
+        processing copy is retained whenever deletion has not completed.
+        """
+
+        destination_key = error_object_key(document.source_metadata.key)
+        error_metadata = await self.s3_repository.copy_object(
+            document.processing_metadata.bucket,
+            document.processing_metadata.key,
+            document.source_metadata.bucket,
+            destination_key,
+            document.source_metadata.content_type,
+            self._processing_user_metadata(document.source_metadata),
+        )
+        if error_metadata.size != document.processing_metadata.size:
+            raise RuntimeError(
+                "error copy size does not match processing object: "
+                f"s3://{document.processing_metadata.bucket}/"
+                f"{document.processing_metadata.key}"
+            )
+        await self.s3_repository.delete_object(
+            document.processing_metadata.bucket,
+            document.processing_metadata.key,
+        )
+        return error_metadata
 
     async def _release_claim(
         self,
@@ -585,6 +697,7 @@ class V1IndexingPipeline(BasePipeline):
         started_at: float,
         normalized_content_type: str | None = None,
         chunks: tuple[DocumentChunk, ...] = (),
+        embeddings: tuple[tuple[float, ...], ...] = (),
     ) -> ObjectProcessingResult:
         return ObjectProcessingResult(
             bucket=source.bucket,
@@ -594,6 +707,7 @@ class V1IndexingPipeline(BasePipeline):
             status=status,
             normalized_content_type=normalized_content_type,
             chunks=chunks,
+            embeddings=embeddings,
             detail=detail,
             elapsed_seconds=asyncio.get_running_loop().time() - started_at,
         )

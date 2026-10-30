@@ -13,7 +13,8 @@ CLI selection
 V1IndexingPipeline(BasePipeline)
     |
     +--> S3 repository ----------> claim + verified processing move + download
-    +--> embedding repository ---> one loaded ONNX session
+    +--> embedding repository ---> count/character-bounded batches
+                               ---> pooled HTTPX client -> embedding service
     +--> DocumentIndexerFactory -> normalized MIME routing
     +--> PDFDocumentIndexer -----> PDFTextExtractorV1 -> PDFChunkerV1
                                                               |
@@ -21,9 +22,9 @@ V1IndexingPipeline(BasePipeline)
 ```
 
 The CLI, job contract, runner, side-effect-free mock, S3 repository, repository
-factory, model synchronization base pipeline, conditional processing workflow,
-embedded PDF text extraction, and chunk creation exist today. Embedding
-inference and Qdrant persistence remain planned.
+factory, conditional processing workflow, embedded PDF text extraction, chunk
+creation, and remote embedding calls exist today. Qdrant persistence remains
+planned.
 
 ## Implemented repository layout
 
@@ -31,7 +32,7 @@ inference and Qdrant persistence remain planned.
 app/
 ├── chunkers/           # PDFChunkerV1 and chunking result contract
 ├── common/
-│   ├── settings/       # S3Settings and EmbeddingModelSettings
+│   ├── settings/       # grouped Pydantic settings, including embedding service
 │   └── utility/        # safe object-key-to-path conversion
 ├── document_indexers/  # MIME-selected document processing boundary
 ├── document_extractors/# local text extraction and ExtractedPage models
@@ -41,7 +42,7 @@ app/
     ├── base.py         # shared repository lifecycle
     ├── factory.py      # infrastructure provider selection
     ├── models.py       # Pydantic bucket/object records
-    ├── embedding/      # ONNX model runtime lifecycle
+    ├── embedding_service/ # HTTPX embedding-service adapter
     └── s3/             # S3 contract and boto3 implementation
 ```
 
@@ -76,11 +77,13 @@ A controller coordinates multiple use cases for the full document pipeline.
 The composition layer creates repositories, use cases, the controller and the
 concrete job; business methods must not construct infrastructure clients.
 
-`RepositoryFactory` creates the RustFS-compatible S3 adapter and ONNX model
-runtime. `DocumentIndexerFactory` separately selects a document implementation
+`RepositoryFactory` creates the RustFS-compatible S3 adapter and the default
+HTTPX embedding-service adapter. `DocumentIndexerFactory` separately selects a document implementation
 from normalized content type. It maps `application/pdf` to a
 `PDFDocumentIndexer` composed with `PDFTextExtractorV1` and `PDFChunkerV1`;
-unsupported types are reported and skipped per object.
+unsupported types are reported and skipped per object. Indexing startup creates
+one `httpx.AsyncClient` with limits derived from `--concurrency` and injects it
+into `HttpxEmbeddingServiceRepository`.
 
 ## Source metadata
 

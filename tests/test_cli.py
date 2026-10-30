@@ -5,11 +5,23 @@ from unittest.mock import patch
 
 from app.cli import parse_command_arguments, run_job_cli
 from app.jobs.mock import MockPDFDocumentIndexing
+from app.jobs.base import AsyncIndexingJob, IndexingJobArguments
 from app.jobs.registry import IndexingPipelineRegistration, IndexingPipelineRegistry
 from app.repository.exceptions import S3ObjectNotFoundError
 
 
 PIPELINE_NAMES = ("mock-pdf",)
+
+
+class FailedObjectJob(AsyncIndexingJob):
+    """Test job that completes its batch with one isolated object failure."""
+
+    @property
+    def failed_count(self) -> int:
+        return 1
+
+    async def run(self) -> None:
+        return None
 
 
 class ParseCommandArgumentsTests(unittest.TestCase):
@@ -160,6 +172,42 @@ class ParseCommandArgumentsTests(unittest.TestCase):
             "Source object not found: s3://documents/contracts/missing.pdf",
             str(log_error.call_args.args[-1]),
         )
+
+    def test_uses_configured_source_bucket_when_argument_is_omitted(self) -> None:
+        command = parse_command_arguments(
+            PIPELINE_NAMES,
+            ["--pipeline", "mock-pdf"],
+            default_source_bucket="configured-documents",
+        )
+
+        self.assertIsNotNone(command.job)
+        assert command.job is not None
+        self.assertEqual(command.job.source_bucket, "configured-documents")
+
+    def test_returns_one_when_batch_contains_failed_object(self) -> None:
+        registry = IndexingPipelineRegistry(
+            registrations=(
+                IndexingPipelineRegistration(
+                    name="v1",
+                    description="V1 pipeline",
+                    job_factory=FailedObjectJob,
+                ),
+            )
+        )
+
+        with patch("app.cli.LOGGER.error") as log_error:
+            exit_code = run_job_cli(
+                registry,
+                [
+                    "--pipeline",
+                    "v1",
+                    "--source-bucket",
+                    "documents",
+                ],
+            )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(log_error.call_args.args[-1], 1)
 
 
 if __name__ == "__main__":
