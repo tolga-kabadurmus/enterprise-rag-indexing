@@ -6,7 +6,7 @@ import logging
 from app.jobs.base import AsyncIndexingJob, IndexingJobArguments
 from app.repository.s3.base import S3Repository
 from app.repository.embedding_service.base import EmbeddingRepository
-from app.repository.qdrant.base import QdrantRepository
+from app.repository.vector.base import VectorRepositoryBase
 
 LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class BasePipeline(AsyncIndexingJob):
         arguments: Validated source selection and concurrency settings.
         s3_repository: Initialized S3 infrastructure adapter.
         embedding_repository: Shared embedding-service adapter.
-        qdrant_repository: Asynchronous vector persistence adapter.
+        vector_repository: Asynchronous vector persistence adapter.
     """
 
     def __init__(
@@ -32,12 +32,12 @@ class BasePipeline(AsyncIndexingJob):
         arguments: IndexingJobArguments,
         s3_repository: S3Repository,
         embedding_repository: EmbeddingRepository,
-        qdrant_repository: QdrantRepository,
+        vector_repository: VectorRepositoryBase,
     ) -> None:
         super().__init__(arguments)
         self.s3_repository = s3_repository
         self.embedding_repository = embedding_repository
-        self.qdrant_repository = qdrant_repository
+        self.vector_repository = vector_repository
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -63,7 +63,7 @@ class BasePipeline(AsyncIndexingJob):
     async def initialize_pipeline_resources(self) -> None:
         """Validate the vector collection before processing documents."""
 
-        await self.qdrant_repository.ensure_collection()
+        await self.vector_repository.ensure_collection()
 
     @abstractmethod
     async def run(self) -> None:
@@ -80,7 +80,7 @@ class BasePipeline(AsyncIndexingJob):
         finally:
             self._initialized = False
             try:
-                await self.qdrant_repository.close()
+                await self.vector_repository.close()
             finally:
                 try:
                     await self.embedding_repository.close()

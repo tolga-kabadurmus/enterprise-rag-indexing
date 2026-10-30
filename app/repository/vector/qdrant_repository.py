@@ -1,4 +1,4 @@
-"""Asynchronous Qdrant adapter for vector persistence."""
+"""Qdrant implementation of provider-neutral vector persistence."""
 
 import asyncio
 import logging
@@ -6,13 +6,13 @@ import logging
 from qdrant_client import AsyncQdrantClient, models
 
 from app.common.settings.qdrant import QdrantSettings
-from app.repository.qdrant.base import QdrantRepository, VectorPoint
+from app.repository.vector.base import VectorPoint, VectorRepositoryBase
 
 LOGGER = logging.getLogger(__name__)
 
 
-class AsyncQdrantRepository(QdrantRepository):
-    """Validate a named-vector collection and perform idempotent point upserts."""
+class QdrantVectorRepository(VectorRepositoryBase):
+    """Validate a Qdrant collection and perform idempotent point upserts."""
 
     def __init__(
         self,
@@ -49,7 +49,6 @@ class AsyncQdrantRepository(QdrantRepository):
                     },
                 )
             except Exception:
-                # Another job may have created it after our existence check.
                 if not await self._client.collection_exists(
                     self._settings.collection_name
                 ):
@@ -57,7 +56,11 @@ class AsyncQdrantRepository(QdrantRepository):
 
         info = await self._client.get_collection(self._settings.collection_name)
         vectors = info.config.params.vectors
-        dense = vectors.get(self._settings.dense_vector_name) if isinstance(vectors, dict) else None
+        dense = (
+            vectors.get(self._settings.dense_vector_name)
+            if isinstance(vectors, dict)
+            else None
+        )
         if dense is None:
             raise RuntimeError("Qdrant collection is missing the configured dense vector")
         if (

@@ -90,13 +90,17 @@ The reference below is generated from the checked-in Python docstrings.
     options:
       members: true
 
-## Qdrant repository
+## Vector repository
 
-::: app.repository.qdrant.base
+::: app.repository.vector.base
     options:
       members: true
 
-::: app.repository.qdrant.async_repository
+::: app.repository.vector.factory
+    options:
+      members: true
+
+::: app.repository.vector.qdrant_repository
     options:
       members: true
 

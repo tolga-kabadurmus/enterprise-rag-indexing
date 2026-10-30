@@ -123,5 +123,5 @@ pipelines and running `mock-pdf` therefore do not require S3 credentials.
 
 The pipeline registry chooses the top-level executable job. It does not replace
 `DocumentIndexerFactory`, which selects a document indexer from normalized
-content type, or `RepositoryFactory`, which selects infrastructure
-implementations.
+content type, or capability-specific factories such as
+`VectorRepositoryFactory`, which selects a registered infrastructure provider.

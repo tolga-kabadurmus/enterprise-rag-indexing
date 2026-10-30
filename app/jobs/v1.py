@@ -33,7 +33,7 @@ from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.exceptions import S3ObjectNotFoundError
 from app.repository.models import S3ObjectMetadata
 from app.repository.s3.base import S3Repository
-from app.repository.qdrant.base import QdrantRepository, VectorPoint
+from app.repository.vector.base import VectorPoint, VectorRepositoryBase
 
 LOGGER = logging.getLogger(__name__)
 
@@ -124,13 +124,13 @@ class V1IndexingPipeline(BasePipeline):
         workspace_settings: IndexingWorkspaceSettings,
         document_indexer_factory: DocumentIndexerFactory,
         embedding_repository: EmbeddingRepository,
-        qdrant_repository: QdrantRepository,
+        vector_repository: VectorRepositoryBase,
     ) -> None:
         super().__init__(
             arguments,
             s3_repository,
             embedding_repository=embedding_repository,
-            qdrant_repository=qdrant_repository,
+            vector_repository=vector_repository,
         )
         self.s3_settings = s3_settings
         self.workspace_settings = workspace_settings
@@ -618,7 +618,7 @@ class V1IndexingPipeline(BasePipeline):
             )
             for chunk, vector in zip(chunks, embeddings, strict=True)
         )
-        await self.qdrant_repository.upsert_points(points)
+        await self.vector_repository.upsert_points(points)
 
     async def _move_to_error_prefix(
         self,

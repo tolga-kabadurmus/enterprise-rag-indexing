@@ -8,6 +8,7 @@ from app.common.settings.indexing import IndexingWorkspaceSettings
 from app.common.settings.pdf_chunking import PDFChunkingSettings
 from app.common.settings.s3 import S3Settings
 from app.common.settings.qdrant import QdrantSettings
+from app.common.settings.vector import VectorSettings
 from app.repository.factory import RepositoryFactory
 from app.repository.s3.boto3_repository import Boto3S3Repository
 
@@ -26,6 +27,7 @@ class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
             "PDF_CHUNK_OVERLAP": "100",
             "QDRANT_COLLECTION_NAME": "custom-chunks",
             "QDRANT_BATCH_SIZE": "20",
+            "VECTOR_PROVIDER": "qdrant",
         }
 
         with patch.dict("os.environ", environment, clear=True):
@@ -33,6 +35,7 @@ class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
             workspace_settings = IndexingWorkspaceSettings()
             chunking_settings = PDFChunkingSettings()
             qdrant_settings = QdrantSettings()
+            vector_settings = VectorSettings()
 
         self.assertEqual(s3_settings.max_concurrency, 6)
         self.assertEqual(s3_settings.processing_bucket, "processing-custom")
@@ -42,6 +45,7 @@ class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunking_settings.overlap, 100)
         self.assertEqual(qdrant_settings.collection_name, "custom-chunks")
         self.assertEqual(qdrant_settings.batch_size, 20)
+        self.assertEqual(vector_settings.provider, "qdrant")
 
     def test_s3_settings_validate_provider_connection_and_concurrency(self) -> None:
         settings = S3Settings(

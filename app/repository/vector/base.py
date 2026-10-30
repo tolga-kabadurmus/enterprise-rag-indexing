@@ -1,4 +1,4 @@
-"""Qdrant persistence contract and provider-neutral point models."""
+"""Provider-neutral vector persistence contract and point models."""
 
 from abc import abstractmethod
 
@@ -17,7 +17,7 @@ class SparseVector(BaseModel):
 
     @model_validator(mode="after")
     def validate_alignment(self) -> "SparseVector":
-        """Reject malformed sparse vectors before sending them to Qdrant."""
+        """Reject malformed sparse vectors before provider persistence."""
 
         if not self.indices or len(self.indices) != len(self.values):
             raise ValueError("sparse indices and values must be non-empty and aligned")
@@ -35,14 +35,13 @@ class VectorPoint(BaseModel):
     sparse_vector: SparseVector | None = None
 
 
-class QdrantRepository(Repository):
-    """Persist chunk vectors in one validated Qdrant collection."""
+class VectorRepositoryBase(Repository):
+    """Persist and manage vectors without exposing the selected provider."""
 
     @abstractmethod
     async def ensure_collection(self) -> None:
-        """Create the collection idempotently or validate its vector schema."""
+        """Create storage idempotently or validate its vector schema."""
 
     @abstractmethod
     async def upsert_points(self, points: tuple[VectorPoint, ...]) -> None:
         """Upsert deterministic points in bounded, retryable batches."""
-

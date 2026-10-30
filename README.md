@@ -84,7 +84,7 @@ RustFS source bucket (+ optional prefix)
 
 - Python 3.12.3 on Ubuntu 24.04.4 LTS is the primary development target.
 - Use Clean Architecture with repositories for infrastructure access, use cases for individual application operations, and a controller when several use cases need orchestration.
-- Inject repository dependencies through constructors. Use `RepositoryFactory` for provider-specific infrastructure adapters and `DocumentIndexerFactory` for document content-type selection.
+- Inject repository dependencies through constructors. Vector persistence uses the registry-based `VectorRepositoryFactory`; `DocumentIndexerFactory` remains responsible only for document content-type selection.
 - Implement indexing resources as an **asynchronous context manager**: `__aenter__()` acquires/initializes them and `__aexit__()` closes/disposes of them.
 - Keep extraction, chunking, embedding, and vector persistence as separate concerns.
 - Keep code straightforward and readable; avoid unnecessary frameworks or abstractions.
@@ -143,6 +143,7 @@ service.
 | `EMBEDDING_SERVICE_MAX_TEXT_CHARACTERS` | `32000` | Aggregate text characters per embedding request |
 | `EMBEDDING_SERVICE_EXPECTED_MODEL` | `intfloat/multilingual-e5-small` | Response model validation |
 | `EMBEDDING_SERVICE_EXPECTED_DIMENSION` | `384` | Response vector dimension validation |
+| `VECTOR_PROVIDER` | `qdrant` | Vector implementation selected by `VectorRepositoryFactory` |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant endpoint |
 | `QDRANT_COLLECTION_NAME` | `enterprise_rag_chunks` | Chunk collection |
 | `QDRANT_DENSE_VECTOR_NAME` | `dense` | Dense named vector |

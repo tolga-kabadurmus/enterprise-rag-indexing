@@ -4,8 +4,9 @@ from types import SimpleNamespace
 from qdrant_client import models
 
 from app.common.settings.qdrant import QdrantSettings
-from app.repository.qdrant.async_repository import AsyncQdrantRepository
-from app.repository.qdrant.base import SparseVector, VectorPoint
+from app.repository.vector.base import SparseVector, VectorPoint, VectorRepositoryBase
+from app.repository.vector.factory import VectorRepositoryFactory
+from app.repository.vector.qdrant_repository import QdrantVectorRepository
 
 
 class FakeQdrantClient:
@@ -41,10 +42,10 @@ class FakeQdrantClient:
         self.closed = True
 
 
-class AsyncQdrantRepositoryTests(unittest.IsolatedAsyncioTestCase):
+class QdrantVectorRepositoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_creates_missing_hybrid_ready_collection(self) -> None:
         client = FakeQdrantClient(exists=False)
-        repository = AsyncQdrantRepository(client, QdrantSettings())
+        repository = QdrantVectorRepository(client, QdrantSettings())
 
         await repository.ensure_collection()
 
@@ -52,7 +53,7 @@ class AsyncQdrantRepositoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_upserts_named_dense_and_optional_sparse_vectors(self) -> None:
         client = FakeQdrantClient()
-        repository = AsyncQdrantRepository(
+        repository = QdrantVectorRepository(
             client,
             QdrantSettings(batch_size=1),
         )
@@ -75,12 +76,36 @@ class AsyncQdrantRepositoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_close_is_idempotent(self) -> None:
         client = FakeQdrantClient()
-        repository = AsyncQdrantRepository(client, QdrantSettings())
+        repository = QdrantVectorRepository(client, QdrantSettings())
 
         await repository.close()
         await repository.close()
 
         self.assertTrue(client.closed)
+
+
+class VectorRepositoryFactoryTests(unittest.TestCase):
+    def test_registered_qdrant_implementation_is_created_through_contract(self) -> None:
+        factory = VectorRepositoryFactory()
+        factory.register("qdrant", QdrantVectorRepository)
+
+        repository = factory.create("QDRANT", FakeQdrantClient(), QdrantSettings())
+
+        self.assertIsInstance(repository, VectorRepositoryBase)
+        self.assertIsInstance(repository, QdrantVectorRepository)
+
+    def test_unknown_provider_is_rejected(self) -> None:
+        factory = VectorRepositoryFactory()
+
+        with self.assertRaisesRegex(ValueError, "unsupported vector provider"):
+            factory.create("milvus")
+
+    def test_duplicate_provider_registration_is_rejected(self) -> None:
+        factory = VectorRepositoryFactory()
+        factory.register("qdrant", QdrantVectorRepository)
+
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            factory.register("qdrant", QdrantVectorRepository)
 
 
 if __name__ == "__main__":

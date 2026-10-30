@@ -13,6 +13,7 @@ from app.common.settings import (
     PDFChunkingSettings,
     QdrantSettings,
     S3Settings,
+    VectorSettings,
 )
 from app.common.utility.logging import configure_standard_logging
 from app.document_indexers.factory import DocumentIndexerFactory
@@ -24,6 +25,9 @@ from app.jobs.registry import (
 )
 from app.jobs.v1 import V1IndexingPipeline
 from app.repository.factory import RepositoryFactory
+from app.repository.vector.factory import VectorRepositoryFactory
+from app.repository.vector.base import VectorRepositoryBase
+from app.repository.vector.qdrant_repository import QdrantVectorRepository
 
 
 def create_embedding_http_client(
@@ -60,6 +64,7 @@ def build_v1_pipeline(arguments: IndexingJobArguments) -> AsyncIndexingJob:
     workspace_settings = IndexingWorkspaceSettings()
     pdf_chunking_settings = PDFChunkingSettings()
     qdrant_settings = QdrantSettings()
+    vector_settings = VectorSettings()
     httpx_client = create_embedding_http_client(
         arguments,
         embedding_service_settings,
@@ -73,21 +78,36 @@ def build_v1_pipeline(arguments: IndexingJobArguments) -> AsyncIndexingJob:
             embedding_service_settings,
             httpx_client,
         ),
-        qdrant_repository=RepositoryFactory.create_qdrant(
+        vector_repository=create_vector_repository(
+            vector_settings,
             qdrant_settings,
-            AsyncQdrantClient(
-                url=qdrant_settings.url,
-                api_key=(
-                    qdrant_settings.api_key.get_secret_value()
-                    if qdrant_settings.api_key is not None
-                    else None
-                ),
-                timeout=qdrant_settings.timeout_seconds,
-            ),
         ),
         document_indexer_factory=DocumentIndexerFactory(
             pdf_chunking_settings=pdf_chunking_settings,
         ),
+    )
+
+
+def create_vector_repository(
+    vector_settings: VectorSettings,
+    qdrant_settings: QdrantSettings,
+) -> VectorRepositoryBase:
+    """Register vector providers and construct the configured implementation."""
+
+    factory = VectorRepositoryFactory()
+    factory.register("qdrant", QdrantVectorRepository)
+    return factory.create(
+        vector_settings.provider,
+        AsyncQdrantClient(
+            url=qdrant_settings.url,
+            api_key=(
+                qdrant_settings.api_key.get_secret_value()
+                if qdrant_settings.api_key is not None
+                else None
+            ),
+            timeout=qdrant_settings.timeout_seconds,
+        ),
+        qdrant_settings,
     )
 
 

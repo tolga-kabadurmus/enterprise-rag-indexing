@@ -8,10 +8,10 @@ from app.pipelines.base import BasePipeline
 from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.models import S3Bucket, S3ObjectMetadata
 from app.repository.s3.base import S3Repository
-from app.repository.qdrant.base import QdrantRepository, VectorPoint
+from app.repository.vector.base import VectorPoint, VectorRepositoryBase
 
 
-class RecordingQdrantRepository(QdrantRepository):
+class RecordingVectorRepository(VectorRepositoryBase):
     def __init__(self, events: list[str]) -> None:
         self.events = events
 
@@ -92,7 +92,7 @@ class RecordingPipeline(BasePipeline):
             IndexingJobArguments(source_bucket="documents"),
             RecordingS3Repository(events),
             RecordingEmbeddingRepository(events),
-            RecordingQdrantRepository(events),
+            RecordingVectorRepository(events),
         )
         self.events = events
         self.fail = fail

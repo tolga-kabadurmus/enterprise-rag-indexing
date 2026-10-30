@@ -5,6 +5,7 @@ from app.common.settings.indexing import IndexingWorkspaceSettings
 from app.common.settings.pdf_chunking import PDFChunkingSettings
 from app.common.settings.qdrant import QdrantSettings
 from app.common.settings.s3 import S3Settings
+from app.common.settings.vector import VectorSettings
 
 __all__ = [
     "EmbeddingServiceSettings",
@@ -12,4 +13,5 @@ __all__ = [
     "PDFChunkingSettings",
     "QdrantSettings",
     "S3Settings",
+    "VectorSettings",
 ]

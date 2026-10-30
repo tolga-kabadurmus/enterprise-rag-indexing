@@ -18,10 +18,10 @@ from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.exceptions import S3ObjectNotFoundError
 from app.repository.models import S3Bucket, S3ObjectMetadata
 from app.repository.s3.base import S3Repository
-from app.repository.qdrant.base import QdrantRepository, VectorPoint
+from app.repository.vector.base import VectorPoint, VectorRepositoryBase
 
 
-class FakeQdrantRepository(QdrantRepository):
+class FakeVectorRepository(VectorRepositoryBase):
     def __init__(self, events: list[str], failure: Exception | None = None) -> None:
         self.events = events
         self.failure = failure
@@ -264,7 +264,7 @@ def build_pipeline(
     events: list[str],
     workspace: Path,
     embedding_repository: EmbeddingRepository | None = None,
-    qdrant_repository: QdrantRepository | None = None,
+    vector_repository: VectorRepositoryBase | None = None,
 ) -> V1IndexingPipeline:
     s3_settings = S3Settings(
         endpoint_url="http://rustfs:9000",
@@ -279,7 +279,7 @@ def build_pipeline(
         workspace_settings=IndexingWorkspaceSettings(work_directory=workspace),
         embedding_repository=embedding_repository
         or FakeEmbeddingServiceRepository(events),
-        qdrant_repository=qdrant_repository or FakeQdrantRepository(events),
+        vector_repository=vector_repository or FakeVectorRepository(events),
         document_indexer_factory=FakeDocumentIndexerFactory(events),
     )
 
@@ -426,7 +426,7 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
             events,
         )
         embedding_repository = FakeEmbeddingServiceRepository(events)
-        qdrant_repository = FakeQdrantRepository(events)
+        vector_repository = FakeVectorRepository(events)
         with tempfile.TemporaryDirectory() as directory:
             pipeline = build_pipeline(
                 IndexingJobArguments(
@@ -437,7 +437,7 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
                 events,
                 Path(directory),
                 embedding_repository,
-                qdrant_repository,
+                vector_repository,
             )
 
             await execute_job(pipeline)
@@ -446,8 +446,8 @@ class V1IndexingPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pipeline.summary.vector_count, 1)
         self.assertIn("embed:document:1", events)
         self.assertIn("embedding-service-close", events)
-        self.assertEqual(len(qdrant_repository.points), 1)
-        point = qdrant_repository.points[0]
+        self.assertEqual(len(vector_repository.points), 1)
+        point = vector_repository.points[0]
         self.assertEqual(point.point_id, "chunk-id")
         self.assertEqual(point.payload["document_id"], "document-id")
         self.assertEqual(point.payload["source_bucket"], "documents")

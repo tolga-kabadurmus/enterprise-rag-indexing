@@ -43,7 +43,7 @@ app/
     ├── factory.py      # infrastructure provider selection
     ├── models.py       # Pydantic bucket/object records
     ├── embedding_service/ # HTTPX embedding-service adapter
-    ├── qdrant/         # async named-vector persistence adapter
+    ├── vector/         # base, registry factory, and provider implementations
     └── s3/             # S3 contract and boto3 implementation
 ```
 
@@ -56,8 +56,8 @@ arguments to the selected factory. Only executable pipelines are registered.
 
 This top-level registry answers "which job should run?" It remains separate
 from `DocumentIndexerFactory`, which answers "how should this content type be
-indexed?", and `RepositoryFactory`, which answers "which infrastructure
-provider should be used?"
+indexed?", and capability-specific repository factories, which answer "which
+provider implements this infrastructure capability?"
 
 ## Validated data models
 
@@ -69,6 +69,8 @@ behavior-oriented jobs or registries inherit from a data-model base class.
 Environment-backed application configuration must use
 `pydantic-settings.BaseSettings`. Direct environment access belongs in a
 settings composition boundary rather than repositories, use cases, or jobs.
+`VECTOR_PROVIDER` selects the registered vector implementation (currently
+`qdrant`); provider-specific `QDRANT_*` settings configure only that adapter.
 
 ## Clean Architecture placement
 
@@ -78,8 +80,11 @@ A controller coordinates multiple use cases for the full document pipeline.
 The composition layer creates repositories, use cases, the controller and the
 concrete job; business methods must not construct infrastructure clients.
 
-`RepositoryFactory` creates the RustFS-compatible S3, HTTPX embedding-service,
-and async Qdrant adapters. `DocumentIndexerFactory` separately selects a document implementation
+`VectorRepositoryFactory` registers vector implementations under stable provider
+keys and constructs the configured implementation through `VectorRepositoryBase`.
+The Qdrant implementation, base contract, models, and factory are colocated in
+`app/repository/vector/`; pipelines do not depend on a Qdrant-specific type.
+`DocumentIndexerFactory` separately selects a document implementation
 from normalized content type. It maps `application/pdf` to a
 `PDFDocumentIndexer` composed with `PDFTextExtractorV1` and `PDFChunkerV1`;
 unsupported types are reported and skipped per object. Indexing startup creates
