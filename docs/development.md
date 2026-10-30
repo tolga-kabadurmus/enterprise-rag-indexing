@@ -28,7 +28,15 @@ explicit RustFS and Qdrant configuration.
 
 The runtime requirements explicitly pin both `pydantic` and
 `pydantic-settings`. Data records that cross application boundaries use frozen
-Pydantic models; future environment configuration must use `BaseSettings`.
+Pydantic models. S3 and embedding artifact configuration use separate
+`BaseSettings` classes under `app/common/settings`.
+
+The existing virtualenv must have runtime and documentation dependencies
+installed before running the complete suite:
+
+```bash
+venv/bin/python -m pip install -r requirements.txt -r requirements-docs.txt
+```
 
 ## Documentation
 
@@ -53,3 +61,8 @@ The root Compose service bind-mounts the local `enterprise-rag-indexing/app`
 directory into the container. Python source edits are therefore visible without
 rebuilding. Rebuild the image after changing `requirements.txt` or the
 Dockerfile.
+
+The service reads `dev-envs/enterprise-rag-indexing.env` from the root
+orchestration repository and mounts the `embedding-models` named volume at
+`/models`. Copy the safe `.env.example` first and make its credentials match
+`dev-envs/rustfs.env`.

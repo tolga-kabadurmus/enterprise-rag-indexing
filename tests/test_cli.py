@@ -1,10 +1,12 @@
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
+from unittest.mock import patch
 
 from app.cli import parse_command_arguments, run_job_cli
 from app.jobs.mock import MockPDFDocumentIndexing
 from app.jobs.registry import IndexingPipelineRegistration, IndexingPipelineRegistry
+from app.repository.exceptions import S3ObjectNotFoundError
 
 
 PIPELINE_NAMES = ("mock-pdf",)
@@ -120,6 +122,44 @@ class ParseCommandArgumentsTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(output.getvalue(), "mock-pdf\tMock PDF pipeline\n")
+
+    def test_missing_exact_object_logs_concise_error_and_returns_one(self) -> None:
+        def missing_object_factory(arguments):
+            raise S3ObjectNotFoundError(
+                arguments.source_bucket,
+                arguments.object_key or "unexpected",
+            )
+
+        registry = IndexingPipelineRegistry(
+            registrations=(
+                IndexingPipelineRegistration(
+                    name="v1",
+                    description="V1 pipeline",
+                    job_factory=missing_object_factory,
+                ),
+            )
+        )
+
+        with patch("app.cli.LOGGER.error") as log_error:
+            exit_code = run_job_cli(
+                registry,
+                [
+                    "--pipeline",
+                    "v1",
+                    "--source-bucket",
+                    "documents",
+                    "--object-key",
+                    "contracts/missing.pdf",
+                ],
+            )
+
+        self.assertEqual(exit_code, 1)
+        log_error.assert_called_once()
+        self.assertNotIn("exc_info", log_error.call_args.kwargs)
+        self.assertIn(
+            "Source object not found: s3://documents/contracts/missing.pdf",
+            str(log_error.call_args.args[-1]),
+        )
 
 
 if __name__ == "__main__":

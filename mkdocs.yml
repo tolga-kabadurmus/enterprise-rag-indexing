@@ -11,6 +11,8 @@ nav:
   - Overview: index.md
   - Architecture: architecture.md
   - Async jobs: async-jobs.md
+  - S3 repository and model sync: s3-repository.md
+  - V1 pipeline: v1-pipeline.md
   - Command line: command-line.md
   - PDF and OCR: pdf-and-ocr.md
   - Development: development.md

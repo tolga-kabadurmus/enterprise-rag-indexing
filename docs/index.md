@@ -12,25 +12,41 @@ The repository currently provides:
 - a validated command-line contract for bucket, exact-key and prefix selection;
 - an asynchronous job lifecycle with cleanup after initialization or execution
   failures;
-- a runnable mock PDF indexing job with bounded async concurrency,
+- a runnable offline mock PDF indexing job with bounded async concurrency,
   deterministic identifiers, and structured lifecycle logging;
-- an explicit pipeline registry and required `--pipeline` CLI selection;
+- a registered `v1` pipeline that loads one ONNX model, supports exact-key or
+  complete bucket/prefix selection, and inspects objects in bounded batches;
+- MIME normalization, `DocumentIndexerFactory`, and `PDFChunkerV1` routing;
+- stdout logging for normal processing and stderr logging for errors;
 - frozen Pydantic models for validated commands, job arguments, registrations,
   and mock chunk metadata;
 - a runner and factory boundary for real indexing jobs;
+- a provider-neutral S3 repository contract and RustFS-compatible boto3
+  adapter for bucket listing, paginated object listing, downloads, and object
+  metadata;
+- grouped Pydantic settings for S3 access and embedding model artifact
+  locations;
+- a `BasePipeline` startup contract that synchronizes embedding model files to
+  a volume before real pipeline-specific initialization;
 - pinned libraries for RustFS/S3, PDF extraction and rendering, RapidOCR, and
   Qdrant;
-- unit tests for command parsing and job cleanup.
+- unit tests for command parsing, job cleanup, S3 behavior, factory routing,
+  settings, safe download paths, and model synchronization order.
 
-The runnable job is explicitly a mock: it does not read RustFS objects or write
-Qdrant points. Concrete PDF extraction, OCR, chunking, embedding and
-persistence stages are not implemented yet. The pages in this site clearly
-distinguish the current contracts from the planned pipeline.
+The registered `v1` job reads real RustFS metadata and loads the configured
+model, but `PDFChunkerV1` returns an explicit `not_implemented` status.
+Concrete PDF extraction, OCR, chunk creation, embedding inference and Qdrant
+persistence are not implemented. Metadata inspection is never reported as
+successful document indexing.
 
 ## Documentation map
 
 - [Architecture](architecture.md) explains component boundaries and metadata.
 - [Async jobs](async-jobs.md) defines lifecycle and cleanup rules.
+- [S3 repository and model sync](s3-repository.md) documents implemented
+  storage operations and configuration.
+- [V1 pipeline](v1-pipeline.md) documents selection, routing, concurrency, and
+  current result statuses.
 - [Command line](command-line.md) documents object selection.
 - [PDF and OCR](pdf-and-ocr.md) records the extraction and RapidOCR decisions.
 - [Development](development.md) lists build, test and documentation commands.

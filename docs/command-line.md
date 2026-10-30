@@ -7,8 +7,9 @@ preventing arbitrary dynamic imports.
 
 !!! warning
 
-    The current command runs a mock. It does not list or download RustFS
-    objects, extract PDF content, generate embeddings, or update Qdrant.
+    `v1` reads real S3 metadata and loads the configured ONNX model, but
+    `PDFChunkerV1` does not yet extract or chunk PDFs. No embeddings or Qdrant
+    points are produced.
 
 ## Arguments
 
@@ -31,44 +32,59 @@ List the pipelines implemented by the current image with:
 python -m app.main --list-pipelines
 ```
 
-The initial registry exposes only `mock-pdf`. A real pipeline must not be
-listed until its complete composition is implemented.
+The registry exposes `mock-pdf` and `v1`. The former is offline; the latter
+performs real model initialization and S3 metadata inspection.
 
 ## Selection examples
 
-Index one object:
+Inspect one exact object:
 
 ```bash
 python -m app.main \
-  --pipeline mock-pdf \
+  --pipeline v1 \
   --source-bucket documents \
   --object-key contracts/contract.pdf \
   --concurrency 2
 ```
 
-Index a prefix:
+Inspect all objects in a bucket:
 
 ```bash
 python -m app.main \
-  --pipeline mock-pdf \
+  --pipeline v1 \
+  --source-bucket documents \
+  --concurrency 4
+```
+
+Inspect a prefix:
+
+```bash
+python -m app.main \
+  --pipeline v1 \
   --source-bucket documents \
   --key-prefix contracts/2026/ \
   --concurrency 4
 ```
 
-The prefix example simulates one object named
-`contracts/2026/mock-document.pdf`. The log output includes its deterministic
-document and chunk IDs.
+When `--object-key` is omitted, `v1` paginates the complete bucket selection.
+Each object receives `head_object` metadata before MIME routing. Missing or
+generic MIME values use a conservative `.pdf` extension fallback.
+
+Source discovery precedes embedding-model download and loading. A nonexistent
+exact key prints a concise error to stderr and returns exit status `1`; no model
+artifacts are synchronized. An empty bucket or prefix returns `0` as a no-op
+and also skips model initialization. An object that disappears after listing
+is isolated as a failed object instead of cancelling the whole batch.
 
 ## Docker Compose
 
-From the orchestration repository, run the one-shot mock independently of the
-development container's sleeping command:
+From the orchestration repository, run `v1` as a one-shot job independently of
+the development container's sleeping command:
 
 ```bash
 docker compose --profile dev run --rm enterprise-rag-indexing \
   python -m app.main \
-  --pipeline mock-pdf \
+  --pipeline v1 \
   --source-bucket documents \
   --key-prefix contracts/2026/ \
   --concurrency 4
@@ -76,33 +92,12 @@ docker compose --profile dev run --rm enterprise-rag-indexing \
 
 ## Composition
 
-The current entry point intentionally remains small:
-
-```python
-from app.jobs.registry import (
-    IndexingPipelineRegistration,
-    IndexingPipelineRegistry,
-)
-from app.jobs.mock import MockPDFDocumentIndexing
-
-
-registry = IndexingPipelineRegistry(
-    registrations=(
-        IndexingPipelineRegistration(
-            name="mock-pdf",
-            description="Simulate PDF indexing without external writes",
-            job_factory=MockPDFDocumentIndexing,
-        ),
-    )
-)
-```
-
-Each factory receives the same `IndexingJobArguments`. To add a pipeline,
-implement `AsyncIndexingJob`, compose its dependencies in `app.main`, and add
-one explicit registration. Provider clients belong in this composition layer
-and must be injected into the concrete job or its controller.
+Each registered factory receives the same `IndexingJobArguments`.
+`build_v1_pipeline()` lazily reads settings and injects S3, embedding runtime,
+and document-indexer dependencies only when `v1` is selected. Listing
+pipelines and running `mock-pdf` therefore do not require S3 credentials.
 
 The pipeline registry chooses the top-level executable job. It does not replace
-`DocumentIndexerFactory`, which will select a document indexer from validated
-content type inside the real pipeline, or `RepositoryFactory`, which selects
-infrastructure implementations.
+`DocumentIndexerFactory`, which selects a document indexer from normalized
+content type, or `RepositoryFactory`, which selects infrastructure
+implementations.

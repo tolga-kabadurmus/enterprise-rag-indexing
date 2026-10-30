@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from app.jobs.base import IndexingJobArguments
 from app.jobs.registry import IndexingPipelineRegistry
 from app.jobs.runner import execute_job_from_factory
+from app.repository.exceptions import S3ObjectNotFoundError
 
 LOGGER = logging.getLogger(__name__)
 
@@ -180,6 +181,14 @@ def run_job_cli(
     except KeyboardInterrupt:
         LOGGER.warning("indexing job interrupted")
         return 130
+    except S3ObjectNotFoundError as error:
+        LOGGER.error(
+            "indexing job rejected pipeline=%s bucket=%s reason=%s",
+            command.pipeline,
+            arguments.source_bucket,
+            error,
+        )
+        return 1
     except Exception:
         LOGGER.exception(
             "indexing job failed pipeline=%s bucket=%s",

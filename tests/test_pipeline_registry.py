@@ -2,9 +2,15 @@ import unittest
 
 from app.jobs.mock import MockPDFDocumentIndexing
 from app.jobs.registry import IndexingPipelineRegistration, IndexingPipelineRegistry
+from app.main import build_pipeline_registry
 
 
 class IndexingPipelineRegistryTests(unittest.TestCase):
+    def test_application_registers_mock_and_v1_workflow_version(self) -> None:
+        registry = build_pipeline_registry()
+
+        self.assertEqual(registry.names, ("mock-pdf", "v1"))
+
     def test_resolves_registered_job_factory(self) -> None:
         registry = IndexingPipelineRegistry(
             registrations=(

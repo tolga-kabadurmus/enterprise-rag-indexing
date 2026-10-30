@@ -25,6 +25,27 @@ venv/bin/mkdocs build --strict
 - Move or transition documents through a staging/processing workflow while guarding against duplicate indexing.
 - Log processing outcomes, handle per-document errors, and release external resources on exit.
 
+## Implemented infrastructure boundary
+
+The project now includes a provider-neutral `S3Repository` contract and a
+RustFS-compatible boto3 implementation. It supports accessible-bucket listing,
+paginated object listing, exact object downloads, prefix downloads, and
+`head_object` metadata. Blocking boto3 calls run through a bounded
+`asyncio.to_thread()` boundary, and the client is closed through the async job
+lifecycle.
+
+`BasePipeline` is the ancestor for real/versioned pipelines. The registered
+`v1` pipeline first discovers an exact object or every selected bucket object.
+Only after successful, non-empty discovery does it download the configured
+embedding artifacts and load the ONNX model once. It then resolves complete S3
+metadata and processes objects concurrently in bounded batches.
+`DocumentIndexerFactory` currently routes PDFs to `PDFChunkerV1`.
+
+`PDFChunkerV1` deliberately returns `not_implemented`: PDF extraction,
+chunk creation, embedding inference, and Qdrant persistence remain later
+steps. The registered `mock-pdf` job remains side-effect-free and does not
+contact RustFS.
+
 ## Conceptual processing flow
 
 ```text
@@ -77,9 +98,35 @@ Moving an object in S3-compatible storage is generally a **copy followed by dele
 
 ## Configuration
 
-Use environment variables and an untracked local `.env` file for the S3 endpoint and credentials, Qdrant connection, embedding provider/model, concurrency, and any staging configuration. Supply `.env.example` without secrets. Exact environment-variable names will be documented when the configuration schema is implemented.
+The root orchestration repository owns all environment files. Copy
+`dev-envs/enterprise-rag-indexing.env.example` to the Git-ignored
+`dev-envs/enterprise-rag-indexing.env`, then make its S3 credentials match the
+RustFS service credentials. Compose injects that file only into the indexing
+service.
 
-The source bucket and optional key prefix are **runtime CLI arguments** rather than hard-coded settings. Any staging bucket argument or setting must also be documented in the implementation.
+| Variable | Default/example | Purpose |
+| --- | --- | --- |
+| `S3_PROVIDER` | `rustfs` | Infrastructure provider selected by `RepositoryFactory` |
+| `S3_ENDPOINT_URL` | `http://rustfs:9000` | Container-network S3 endpoint |
+| `S3_ACCESS_KEY` | required | RustFS access key |
+| `S3_SECRET_KEY` | required | RustFS secret key |
+| `S3_REGION` | `us-east-1` | S3 signing region |
+| `S3_ADDRESSING_STYLE` | `path` | boto3 addressing style |
+| `S3_VERIFY_TLS` | `false` locally | TLS certificate verification |
+| `S3_MAX_CONCURRENCY` | `4` | Maximum simultaneous blocking boto3 calls |
+| `EMBEDDINGS_BUCKET` | `models` | Bucket containing model artifacts |
+| `EMBEDDINGS_KEY_PREFIX` | `embeddings` | Model artifact key prefix |
+| `EMBEDDINGS_LOCAL_DIRECTORY` | `/models/embeddings` | Volume-backed local model directory |
+| `EMBEDDINGS_RUNTIME` | `onnx` | Model runtime created by `RepositoryFactory` |
+| `EMBEDDINGS_MODEL_FILE` | `onnx/model.onnx` | Model artifact relative to the local directory |
+
+`S3Settings` and `EmbeddingModelSettings` are separate Pydantic
+`BaseSettings` classes under `app/common/settings`. Never log credentials.
+
+The source-document bucket and optional key prefix are **runtime CLI
+arguments** rather than hard-coded settings. The embedding-model bucket and
+prefix are application environment settings because every real pipeline needs
+them during startup.
 
 ## Running with Docker Compose
 
@@ -89,12 +136,22 @@ This module is a Git submodule of the top-level [`enterprise-rag`](https://githu
 docker compose --profile dev up -d rustfs qdrant
 docker compose --profile dev run --rm enterprise-rag-indexing \
   python -m app.main \
-  --pipeline mock-pdf \
+  --pipeline v1 \
   --source-bucket documents \
   --key-prefix contracts/2026/
 ```
 
-The required `--pipeline` argument is resolved through an explicit registry. Use `python -m app.main --list-pipelines` to inspect pipelines implemented by the image. `mock-pdf` validates CLI parsing, asynchronous lifecycle, concurrency, deterministic IDs, logging, and cleanup. It does **not** read RustFS, extract documents, generate embeddings, or write Qdrant points. The Dockerfile uses `dumb-init` as its entrypoint/PID 1 mechanism, and the development service bind-mounts the local `app` package for rapid code changes.
+Omit both `--object-key` and `--key-prefix` to inspect every object in the
+source bucket. `v1` logs metadata and truthful per-object statuses but does not
+yet create chunks or vectors. Use `python -m app.main --list-pipelines` to see
+registered workflows. `mock-pdf` remains available for a fully offline
+lifecycle check. The Dockerfile uses `dumb-init` as its entrypoint/PID 1
+mechanism, and the development service bind-mounts the local `app` package.
+
+A missing exact `--object-key` is reported as a concise repository-level error
+and exits with status `1`, allowing Kubernetes or Argo to mark the run failed.
+An empty bucket/prefix selection is a successful no-op and skips model download
+and loading.
 
 Check the root project's README for cloning submodules and stopping the stack. This indexing container is a disposable job; it should not run as a persistent daemon.
 
@@ -116,4 +173,6 @@ Use unit tests for chunking, metadata, factories, use cases, and controllers, wi
 
 **Initial target:** PDF indexing into Qdrant with traceable source metadata and basic logging/error handling. Other document formats, advanced orchestration, CI/CD, Kubernetes/OpenShift Helm charts, and observability dashboards are potential extensions, not implemented features.
 
-This README describes the **intended design**, not a claim that its code, CLI flags, Docker image, or services already exist. Update commands and configuration details when they are implemented.
+The current `v1` implementation ends after metadata routing and the explicit
+`PDFChunkerV1` placeholder result. It must not be described as a complete PDF
+indexing or embedding pipeline.

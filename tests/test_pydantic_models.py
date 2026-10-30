@@ -3,9 +3,13 @@ import unittest
 from pydantic import BaseModel, ValidationError
 
 from app.cli import IndexingCommandArguments
+from app.repository.models import S3Bucket, S3ObjectMetadata
 from app.jobs.base import IndexingJobArguments
 from app.jobs.mock import MockIndexedChunk
 from app.jobs.registry import IndexingPipelineRegistration
+from app.jobs.v1 import ObjectProcessingResult, V1BatchSummary
+from app.chunkers.base import ChunkingResult
+from app.document_indexers.base import DocumentIndexingResult
 
 
 class PydanticModelTests(unittest.TestCase):
@@ -15,6 +19,12 @@ class PydanticModelTests(unittest.TestCase):
             IndexingJobArguments,
             MockIndexedChunk,
             IndexingPipelineRegistration,
+            S3Bucket,
+            S3ObjectMetadata,
+            ChunkingResult,
+            DocumentIndexingResult,
+            ObjectProcessingResult,
+            V1BatchSummary,
         )
 
         for model_type in model_types:

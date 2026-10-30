@@ -10,20 +10,39 @@ closes resources and exits.
 CLI selection
     |
     v
-concrete AsyncIndexingJob
+V1IndexingPipeline(BasePipeline)
     |
-    +--> S3 repository --> PDF bytes and source metadata
-    +--> extractor ------> page text or rendered page
-    +--> OCR ------------> text for scanned pages
-    +--> chunker --------> bounded text chunks
-    +--> embedder -------> vectors
-    +--> Qdrant repository -> idempotent upserts
+    +--> S3 repository ----------> selection + complete metadata
+    +--> embedding repository ---> one loaded ONNX session
+    +--> DocumentIndexerFactory -> normalized MIME routing
+    +--> PDFDocumentIndexer -----> PDFChunkerV1
+                                      |
+                                      +--> not_implemented (current boundary)
 ```
 
-The CLI, job contract, runner, and a side-effect-free mock implementation exist
-today. The mock validates composition, concurrency, deterministic identifiers,
-logging, and cleanup. The external pipeline components shown above remain the
-planned next implementation stages.
+The CLI, job contract, runner, side-effect-free mock, S3 repository, repository
+factory, model synchronization base pipeline, and `v1` metadata-routing job
+exist today. PDF extraction, chunk creation, embedding inference, and Qdrant
+persistence remain planned.
+
+## Implemented repository layout
+
+```text
+app/
+├── chunkers/           # PDFChunkerV1 and chunking result contract
+├── common/
+│   ├── settings/       # S3Settings and EmbeddingModelSettings
+│   └── utility/        # safe object-key-to-path conversion
+├── document_indexers/  # MIME-selected document processing boundary
+├── jobs/               # v1 and offline mock top-level jobs
+├── pipelines/          # BasePipeline startup/cleanup contract
+└── repository/
+    ├── base.py         # shared repository lifecycle
+    ├── factory.py      # infrastructure provider selection
+    ├── models.py       # Pydantic bucket/object records
+    ├── embedding/      # ONNX model runtime lifecycle
+    └── s3/             # S3 contract and boto3 implementation
+```
 
 ## Pipeline selection
 
@@ -56,9 +75,11 @@ A controller coordinates multiple use cases for the full document pipeline.
 The composition layer creates repositories, use cases, the controller and the
 concrete job; business methods must not construct infrastructure clients.
 
-`DocumentIndexerFactory` selects a document implementation from a validated
-content type. It must remain separate from `RepositoryFactory`, which selects
-infrastructure providers.
+`RepositoryFactory` creates the RustFS-compatible S3 adapter and ONNX model
+runtime. `DocumentIndexerFactory` separately selects a document implementation
+from normalized content type. It maps `application/pdf` to a
+`PDFDocumentIndexer` composed with `PDFChunkerV1`; unsupported types are
+reported and skipped per object.
 
 ## Source metadata
 

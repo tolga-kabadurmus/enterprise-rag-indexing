@@ -61,3 +61,29 @@ the event loop.
 The job remains responsible for per-document success and failure reporting.
 One failed document should not corrupt the state of other documents in the
 same batch.
+
+## Real pipeline startup
+
+Real/versioned pipelines inherit `BasePipeline`. Its non-overridable lifecycle
+methods enforce this order:
+
+```text
+discover and validate source selection
+    -> stop successfully if the selection is empty
+    -> download configured embedding artifacts
+    -> load one shared ONNX model
+    -> run once
+    -> release ONNX model
+    -> close S3 repository
+```
+
+`V1IndexingPipeline` uses the resource hooks to load and release its shared
+model once. It creates bounded batches no larger than `--concurrency` and also
+uses a semaphore around per-object work. One metadata failure produces a
+failed object result without cancelling other objects. Exact-key selection
+failures fail the job because there is no remaining selection to process.
+They are translated to `S3ObjectNotFoundError`, logged without an SDK
+traceback, and produce process exit status `1` before model initialization.
+
+The registered `mock-pdf` job intentionally inherits `AsyncIndexingJob`
+directly so the diagnostic run stays offline.
