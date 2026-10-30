@@ -8,12 +8,15 @@ from qdrant_client import AsyncQdrantClient
 
 from app.cli import run_job_cli
 from app.common.settings import (
+    EmbeddingProvider,
     EmbeddingServiceSettings,
     IndexingWorkspaceSettings,
     PDFChunkingSettings,
     QdrantSettings,
     S3Settings,
+    StorageProvider,
     VectorSettings,
+    VectorProvider,
 )
 from app.common.utility.logging import configure_standard_logging
 from app.document_indexers.factory import DocumentIndexerFactory
@@ -24,10 +27,20 @@ from app.jobs.registry import (
     IndexingPipelineRegistry,
 )
 from app.jobs.v1 import V1IndexingPipeline
-from app.repository.factory import RepositoryFactory
+from app.repository.embedding_service.base import EmbeddingRepository
+from app.repository.embedding_service.factory import EmbeddingRepositoryFactory
+from app.repository.embedding_service.fallback_local_factory import (
+    FallBackLocalEmbeddingFactory,
+)
+from app.repository.embedding_service.enterprise_embedding_service_repository import (
+    EnterpriseEmbeddingServiceRepository,
+)
 from app.repository.vector.factory import VectorRepositoryFactory
 from app.repository.vector.base import VectorRepositoryBase
 from app.repository.vector.qdrant_repository import QdrantVectorRepository
+from app.repository.s3.boto3_repository import S3Repository
+from app.repository.s3.factory import StorageRepositoryFactory
+from app.repository.s3.base import StorageRepositoryBase
 
 
 def create_embedding_http_client(
@@ -65,18 +78,14 @@ def build_v1_pipeline(arguments: IndexingJobArguments) -> AsyncIndexingJob:
     pdf_chunking_settings = PDFChunkingSettings()
     qdrant_settings = QdrantSettings()
     vector_settings = VectorSettings()
-    httpx_client = create_embedding_http_client(
-        arguments,
-        embedding_service_settings,
-    )
     return V1IndexingPipeline(
         arguments=arguments,
-        s3_repository=RepositoryFactory.create_s3(s3_settings),
+        s3_repository=create_storage_repository(s3_settings),
         s3_settings=s3_settings,
         workspace_settings=workspace_settings,
-        embedding_repository=RepositoryFactory.create_embedding_service(
+        embedding_repository=create_embedding_repository(
+            arguments,
             embedding_service_settings,
-            httpx_client,
         ),
         vector_repository=create_vector_repository(
             vector_settings,
@@ -95,7 +104,7 @@ def create_vector_repository(
     """Register vector providers and construct the configured implementation."""
 
     factory = VectorRepositoryFactory()
-    factory.register("qdrant", QdrantVectorRepository)
+    factory.register(VectorProvider.QDRANT, QdrantVectorRepository)
     return factory.create(
         vector_settings.provider,
         AsyncQdrantClient(
@@ -109,6 +118,35 @@ def create_vector_repository(
         ),
         qdrant_settings,
     )
+
+
+def create_storage_repository(settings: S3Settings) -> StorageRepositoryBase:
+    """Register storage providers and construct the configured implementation."""
+
+    factory = StorageRepositoryFactory()
+    factory.register(StorageProvider.RUSTFS, S3Repository)
+    return factory.create(settings.provider, settings)
+
+
+def create_embedding_repository(
+    arguments: IndexingJobArguments,
+    settings: EmbeddingServiceSettings,
+) -> EmbeddingRepository:
+    """Register embedding providers and construct the selected implementation."""
+
+    factory = EmbeddingRepositoryFactory()
+    factory.register(EmbeddingProvider.HTTPX, EnterpriseEmbeddingServiceRepository)
+    factory.register(
+        EmbeddingProvider.FALLBACK_LOCAL,
+        FallBackLocalEmbeddingFactory,
+    )
+    if settings.provider is EmbeddingProvider.HTTPX:
+        return factory.create(
+            settings.provider,
+            create_embedding_http_client(arguments, settings),
+            settings,
+        )
+    return factory.create(settings.provider)
 
 
 def build_pipeline_registry() -> IndexingPipelineRegistry:

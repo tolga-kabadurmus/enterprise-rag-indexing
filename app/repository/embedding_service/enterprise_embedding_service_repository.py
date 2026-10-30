@@ -30,7 +30,7 @@ class EmbeddingResponse(BaseModel):
     embeddings: tuple[tuple[float, ...], ...]
 
 
-class HttpxEmbeddingServiceRepository(EmbeddingRepository):
+class EnterpriseEmbeddingServiceRepository(EmbeddingRepository):
     """Call the shared embedding API using an injected pooled HTTPX client.
 
     The client is created by the indexing startup composition layer. This
@@ -142,5 +142,5 @@ class HttpxEmbeddingServiceRepository(EmbeddingRepository):
 __all__ = [
     "EmbeddingRequest",
     "EmbeddingResponse",
-    "HttpxEmbeddingServiceRepository",
+    "EnterpriseEmbeddingServiceRepository",
 ]

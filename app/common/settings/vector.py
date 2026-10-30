@@ -1,7 +1,14 @@
 """Provider selection settings for vector persistence."""
 
-from pydantic import Field
+from enum import Enum
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class VectorProvider(str, Enum):
+    """Supported vector repository provider keys."""
+
+    QDRANT = "qdrant"
 
 
 class VectorSettings(BaseSettings):
@@ -14,4 +21,4 @@ class VectorSettings(BaseSettings):
         frozen=True,
     )
 
-    provider: str = Field(default="qdrant", min_length=1)
+    provider: VectorProvider = VectorProvider.QDRANT

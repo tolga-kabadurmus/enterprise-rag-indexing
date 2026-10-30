@@ -2,8 +2,10 @@
 
 ## Implemented operations
 
-`S3Repository` is the provider-neutral storage contract. The current
-`Boto3S3Repository` implementation is configured for RustFS and provides:
+`StorageRepositoryBase` is the provider-neutral storage contract.
+`StorageRepositoryFactory` registers implementations with `StorageProvider`
+enum keys. The current `S3Repository` implementation is configured for RustFS
+and provides:
 
 - accessible bucket listing;
 - complete, paginated `list_objects_v2` discovery;

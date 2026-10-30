@@ -2,6 +2,7 @@
 
 from typing import Any, TypeVar
 
+from app.common.settings.vector import VectorProvider
 from app.repository.vector.base import VectorRepositoryBase
 
 VectorRepositoryType = TypeVar(
@@ -14,11 +15,11 @@ class VectorRepositoryFactory:
     """Register and construct implementations of the vector capability."""
 
     def __init__(self) -> None:
-        self._providers: dict[str, type[VectorRepositoryBase]] = {}
+        self._providers: dict[VectorProvider, type[VectorRepositoryBase]] = {}
 
     def register(
         self,
-        provider: str,
+        provider: VectorProvider,
         repository_type: type[VectorRepositoryType],
     ) -> None:
         """Register one vector implementation under a stable provider key.
@@ -32,16 +33,15 @@ class VectorRepositoryFactory:
             ValueError: If the provider key is empty or already registered.
         """
 
-        key = self._normalize_provider(provider)
         if not issubclass(repository_type, VectorRepositoryBase):
             raise TypeError("vector repository must inherit VectorRepositoryBase")
-        if key in self._providers:
-            raise ValueError(f"vector provider is already registered: {key}")
-        self._providers[key] = repository_type
+        if provider in self._providers:
+            raise ValueError(f"vector provider is already registered: {provider.value}")
+        self._providers[provider] = repository_type
 
     def create(
         self,
-        provider: str,
+        provider: VectorProvider,
         *args: Any,
         **kwargs: Any,
     ) -> VectorRepositoryBase:
@@ -54,15 +54,7 @@ class VectorRepositoryFactory:
             ValueError: If no implementation is registered for the provider.
         """
 
-        key = self._normalize_provider(provider)
-        repository_type = self._providers.get(key)
+        repository_type = self._providers.get(provider)
         if repository_type is None:
-            raise ValueError(f"unsupported vector provider: {key}")
+            raise ValueError(f"unsupported vector provider: {provider.value}")
         return repository_type(*args, **kwargs)
-
-    @staticmethod
-    def _normalize_provider(provider: str) -> str:
-        key = provider.strip().lower()
-        if not key:
-            raise ValueError("vector provider must not be empty")
-        return key

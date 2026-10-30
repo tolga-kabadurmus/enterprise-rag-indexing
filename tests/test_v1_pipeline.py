@@ -17,7 +17,7 @@ from app.jobs.v1 import V1IndexingPipeline
 from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.exceptions import S3ObjectNotFoundError
 from app.repository.models import S3Bucket, S3ObjectMetadata
-from app.repository.s3.base import S3Repository
+from app.repository.s3.base import StorageRepositoryBase
 from app.repository.vector.base import VectorPoint, VectorRepositoryBase
 
 
@@ -77,7 +77,7 @@ class FakeEmbeddingServiceRepository(EmbeddingRepository):
         self.events.append("embedding-service-close")
 
 
-class FakeS3Repository(S3Repository):
+class FakeS3Repository(StorageRepositoryBase):
     def __init__(
         self,
         objects: dict[tuple[str, str], S3ObjectMetadata],

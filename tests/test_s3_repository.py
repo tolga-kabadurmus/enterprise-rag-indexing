@@ -10,7 +10,7 @@ from botocore.exceptions import ClientError
 
 from app.common.settings.s3 import S3Settings
 from app.repository.exceptions import S3ObjectNotFoundError
-from app.repository.s3.boto3_repository import Boto3S3Repository
+from app.repository.s3.boto3_repository import S3Repository as Boto3S3Repository
 
 
 class FakePaginator:

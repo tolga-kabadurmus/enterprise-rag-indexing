@@ -32,7 +32,7 @@ from app.pipelines.base import BasePipeline
 from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.exceptions import S3ObjectNotFoundError
 from app.repository.models import S3ObjectMetadata
-from app.repository.s3.base import S3Repository
+from app.repository.s3.base import StorageRepositoryBase
 from app.repository.vector.base import VectorPoint, VectorRepositoryBase
 
 LOGGER = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ class V1IndexingPipeline(BasePipeline):
     def __init__(
         self,
         arguments: IndexingJobArguments,
-        s3_repository: S3Repository,
+        s3_repository: StorageRepositoryBase,
         s3_settings: S3Settings,
         workspace_settings: IndexingWorkspaceSettings,
         document_indexer_factory: DocumentIndexerFactory,

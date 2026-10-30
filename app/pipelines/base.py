@@ -4,7 +4,7 @@ from abc import abstractmethod
 import logging
 
 from app.jobs.base import AsyncIndexingJob, IndexingJobArguments
-from app.repository.s3.base import S3Repository
+from app.repository.s3.base import StorageRepositoryBase
 from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.vector.base import VectorRepositoryBase
 
@@ -30,7 +30,7 @@ class BasePipeline(AsyncIndexingJob):
     def __init__(
         self,
         arguments: IndexingJobArguments,
-        s3_repository: S3Repository,
+        s3_repository: StorageRepositoryBase,
         embedding_repository: EmbeddingRepository,
         vector_repository: VectorRepositoryBase,
     ) -> None:

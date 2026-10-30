@@ -18,13 +18,13 @@ from app.common.settings.s3 import S3Settings
 from app.common.utility.paths import safe_object_destination
 from app.repository.models import S3Bucket, S3ObjectMetadata
 from app.repository.exceptions import S3ObjectNotFoundError
-from app.repository.s3.base import S3Repository
+from app.repository.s3.base import StorageRepositoryBase
 
 LOGGER = logging.getLogger(__name__)
 ResultT = TypeVar("ResultT")
 
 
-class Boto3S3Repository(S3Repository):
+class S3Repository(StorageRepositoryBase):
     """Expose bounded asynchronous S3 operations over blocking boto3 calls.
 
     Args:

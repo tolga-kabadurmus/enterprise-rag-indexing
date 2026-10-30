@@ -2,15 +2,15 @@ import unittest
 
 import httpx
 
-from app.common.settings.embedding_service import EmbeddingServiceSettings
-from app.repository.factory import RepositoryFactory
-from app.repository.embedding_service.httpx_repository import (
-    HttpxEmbeddingServiceRepository,
+from app.common.settings.embedding_service import EmbeddingProvider, EmbeddingServiceSettings
+from app.repository.embedding_service.factory import EmbeddingRepositoryFactory
+from app.repository.embedding_service.enterprise_embedding_service_repository import (
+    EnterpriseEmbeddingServiceRepository,
 )
 from app.repository.embedding_service.exceptions import EmbeddingServiceRequestError
 
 
-class HttpxEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase):
+class EnterpriseEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_factory_defaults_to_httpx_and_preserves_injected_client(self) -> None:
         client = httpx.AsyncClient(
             transport=httpx.MockTransport(
@@ -18,9 +18,12 @@ class HttpxEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        repository = RepositoryFactory.create_embedding_service(
-            EmbeddingServiceSettings(),
+        factory = EmbeddingRepositoryFactory()
+        factory.register(EmbeddingProvider.HTTPX, EnterpriseEmbeddingServiceRepository)
+        repository = factory.create(
+            EmbeddingProvider.HTTPX,
             client,
+            EmbeddingServiceSettings(),
         )
 
         self.assertIs(repository._httpx_client, client)
@@ -29,7 +32,7 @@ class HttpxEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_close_is_idempotent_and_closes_httpx_client(self) -> None:
         client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
-        repository = HttpxEmbeddingServiceRepository(
+        repository = EnterpriseEmbeddingServiceRepository(
             client,
             EmbeddingServiceSettings(),
         )
@@ -58,7 +61,7 @@ class HttpxEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase):
             base_url="http://embedding.test",
             transport=httpx.MockTransport(handler),
         )
-        repository = HttpxEmbeddingServiceRepository(
+        repository = EnterpriseEmbeddingServiceRepository(
             client,
             EmbeddingServiceSettings(
                 expected_dimension=2,
@@ -88,7 +91,7 @@ class HttpxEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase):
                 )
             ),
         )
-        repository = HttpxEmbeddingServiceRepository(
+        repository = EnterpriseEmbeddingServiceRepository(
             client,
             EmbeddingServiceSettings(expected_dimension=2),
         )
@@ -112,7 +115,7 @@ class HttpxEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase):
                 )
             ),
         )
-        repository = HttpxEmbeddingServiceRepository(
+        repository = EnterpriseEmbeddingServiceRepository(
             client,
             EmbeddingServiceSettings(
                 expected_dimension=2,
@@ -135,7 +138,7 @@ class HttpxEmbeddingServiceRepositoryTests(unittest.IsolatedAsyncioTestCase):
                 )
             ),
         )
-        repository = HttpxEmbeddingServiceRepository(
+        repository = EnterpriseEmbeddingServiceRepository(
             client,
             EmbeddingServiceSettings(),
         )

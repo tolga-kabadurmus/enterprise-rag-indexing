@@ -6,11 +6,11 @@ from pydantic import ValidationError
 
 from app.common.settings.indexing import IndexingWorkspaceSettings
 from app.common.settings.pdf_chunking import PDFChunkingSettings
-from app.common.settings.s3 import S3Settings
+from app.common.settings.s3 import S3Settings, StorageProvider
 from app.common.settings.qdrant import QdrantSettings
 from app.common.settings.vector import VectorSettings
-from app.repository.factory import RepositoryFactory
-from app.repository.s3.boto3_repository import Boto3S3Repository
+from app.repository.s3.boto3_repository import S3Repository
+from app.repository.s3.factory import StorageRepositoryFactory
 
 
 class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
@@ -84,9 +84,11 @@ class SettingsAndFactoryTests(unittest.IsolatedAsyncioTestCase):
             secret_key="secret",
         )
 
-        repository = RepositoryFactory.create_s3(settings)
+        factory = StorageRepositoryFactory()
+        factory.register(StorageProvider.RUSTFS, S3Repository)
+        repository = factory.create(settings.provider, settings)
         try:
-            self.assertIsInstance(repository, Boto3S3Repository)
+            self.assertIsInstance(repository, S3Repository)
         finally:
             await repository.close()
 

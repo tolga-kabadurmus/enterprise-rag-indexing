@@ -19,7 +19,7 @@ class DocumentIndexerFactory:
     """Select document processing from an already normalized content type.
 
     This factory is deliberately separate from infrastructure
-    ``RepositoryFactory`` and the top-level pipeline registry.
+    capability-specific repository factories and the top-level pipeline registry.
     """
 
     def __init__(

@@ -27,8 +27,9 @@ venv/bin/mkdocs build --strict
 
 ## Implemented infrastructure boundary
 
-The project now includes a provider-neutral `S3Repository` contract and a
-RustFS-compatible boto3 implementation. It supports accessible-bucket listing,
+The project now includes a provider-neutral `StorageRepositoryBase`, an
+enum-keyed `StorageRepositoryFactory`, and a RustFS-compatible `S3Repository`.
+It supports accessible-bucket listing,
 paginated object listing, exact object downloads, prefix downloads, and
 `head_object` metadata. Blocking boto3 calls run through a bounded
 `asyncio.to_thread()` boundary, and the client is closed through the async job
@@ -52,39 +53,59 @@ to Qdrant with deterministic IDs and citation payloads.
 Processing objects are therefore retained. The registered `mock-pdf` job remains
 side-effect-free.
 
-## Conceptual processing flow
+## Important component sequence
 
-```text
-RustFS source bucket (+ optional prefix)
-            |
-            v
-    Object discovery / claim
-            |
-            v
-  DocumentIndexerFactory
-      (PDF initially)
-            |
-            v
-     Text extraction
-            |
-            v
-      Document chunks
-            |
-            v
-   Embedding service (pooled HTTPX)
-            |
-            v
- Qdrant vectors + metadata
-            |
-            v
- Processing result / staging state
+```mermaid
+sequenceDiagram
+    actor Operator
+    participant CLI
+    participant Main as main.py
+    participant Pipeline as V1IndexingPipeline
+    participant Storage as StorageRepository
+    participant Embedding as EmbeddingRepository
+    participant VectorDB as VectorRepository
+
+    Operator->>CLI: Start v1 with bucket/key selection
+    CLI->>Main: Validated IndexingJobArguments
+    Main->>Main: Register and create repositories
+    Main->>Pipeline: Run async indexing job
+    Pipeline->>Storage: Discover, claim, stage, download PDF
+    Storage-->>Pipeline: Object metadata and local document
+    Pipeline->>Pipeline: Extract and chunk with citation metadata
+    Pipeline->>Embedding: Embed document chunks
+    Embedding-->>Pipeline: Dense vectors
+    Pipeline->>VectorDB: Upsert vectors and citation payloads
+    VectorDB-->>Pipeline: Upsert complete
+    Pipeline->>Storage: Release claim / retain processing state
+    Pipeline-->>CLI: Batch result
+    CLI-->>Operator: Exit status and logs
+```
+
+## Important component relationships
+
+```mermaid
+flowchart LR
+    CLI[CLI] --> Main[main.py composition]
+    Main --> Pipeline[V1IndexingPipeline]
+    Main --> SF[StorageRepositoryFactory]
+    Main --> EF[EmbeddingRepositoryFactory]
+    Main --> VF[VectorRepositoryFactory]
+    SF --> Storage[StorageRepositoryBase]
+    EF --> Embedding[EmbeddingRepository]
+    VF --> VectorDB[VectorRepositoryBase]
+    Pipeline --> Storage
+    Pipeline --> Embedding
+    Pipeline --> VectorDB
+    Storage --> RustFS[(RustFS / S3)]
+    Embedding --> EmbeddingAPI[enterprise-rag-embedding-service]
+    VectorDB --> Qdrant[(Qdrant)]
 ```
 
 ## Architectural conventions
 
 - Python 3.12.3 on Ubuntu 24.04.4 LTS is the primary development target.
 - Use Clean Architecture with repositories for infrastructure access, use cases for individual application operations, and a controller when several use cases need orchestration.
-- Inject repository dependencies through constructors. Vector persistence uses the registry-based `VectorRepositoryFactory`; `DocumentIndexerFactory` remains responsible only for document content-type selection.
+- Inject repository dependencies through constructors. Storage, vector, and embedding providers use enum-keyed registry factories; `DocumentIndexerFactory` remains responsible only for document content-type selection.
 - Implement indexing resources as an **asynchronous context manager**: `__aenter__()` acquires/initializes them and `__aexit__()` closes/disposes of them.
 - Keep extraction, chunking, embedding, and vector persistence as separate concerns.
 - Keep code straightforward and readable; avoid unnecessary frameworks or abstractions.
@@ -118,7 +139,7 @@ service.
 
 | Variable | Default/example | Purpose |
 | --- | --- | --- |
-| `S3_PROVIDER` | `rustfs` | Infrastructure provider selected by `RepositoryFactory` |
+| `S3_PROVIDER` | `rustfs` | Provider selected by `StorageRepositoryFactory` |
 | `S3_ENDPOINT_URL` | `http://rustfs:9000` | Container-network S3 endpoint |
 | `S3_ACCESS_KEY` | required | RustFS access key |
 | `S3_SECRET_KEY` | required | RustFS secret key |
@@ -132,7 +153,7 @@ service.
 | `INDEXING_WORK_DIRECTORY` | `/work/indexing` | Ephemeral local PDF workspace |
 | `PDF_CHUNK_SIZE` | `1200` | Maximum normalized characters per chunk |
 | `PDF_CHUNK_OVERLAP` | `200` | Character overlap between adjacent page chunks |
-| `EMBEDDING_SERVICE_PROVIDER` | `httpx` | Provider selected by `RepositoryFactory` |
+| `EMBEDDING_SERVICE_PROVIDER` | `httpx` | Provider selected by `EmbeddingRepositoryFactory`; `fallback_local` explicitly raises `NotImplementedError` |
 | `EMBEDDING_SERVICE_URL` | `http://enterprise-rag-embedding-service:8081` | Shared embedding API base URL |
 | `EMBEDDING_SERVICE_API_PATH` | `/v1/embeddings` | Embedding API path |
 | `EMBEDDING_SERVICE_TIMEOUT_SECONDS` | `60` | Per-request HTTP timeout |

@@ -81,15 +81,17 @@ The composition layer creates repositories, use cases, the controller and the
 concrete job; business methods must not construct infrastructure clients.
 
 `VectorRepositoryFactory` registers vector implementations under stable provider
-keys and constructs the configured implementation through `VectorRepositoryBase`.
+enum keys and constructs the configured implementation through `VectorRepositoryBase`.
 The Qdrant implementation, base contract, models, and factory are colocated in
 `app/repository/vector/`; pipelines do not depend on a Qdrant-specific type.
+`EmbeddingRepositoryFactory` similarly registers the HTTPX implementation and
+the explicit, unimplemented `FallBackLocalEmbeddingFactory` compatibility path.
 `DocumentIndexerFactory` separately selects a document implementation
 from normalized content type. It maps `application/pdf` to a
 `PDFDocumentIndexer` composed with `PDFTextExtractorV1` and `PDFChunkerV1`;
 unsupported types are reported and skipped per object. Indexing startup creates
 one `httpx.AsyncClient` with limits derived from `--concurrency` and injects it
-into `HttpxEmbeddingServiceRepository`.
+into `EnterpriseEmbeddingServiceRepository`.
 
 ## Source metadata
 

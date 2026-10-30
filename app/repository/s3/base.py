@@ -7,7 +7,7 @@ from app.repository.base import Repository
 from app.repository.models import S3Bucket, S3ObjectMetadata
 
 
-class S3Repository(Repository):
+class StorageRepositoryBase(Repository):
     """Async boundary for the S3 operations required by indexing pipelines."""
 
     @abstractmethod

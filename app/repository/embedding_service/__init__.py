@@ -1,17 +1,23 @@
-"""Embedding service repository contracts and HTTP implementation."""
+"""Embedding repository contract, factory, and implementations."""
 
 from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.embedding_service.exceptions import EmbeddingServiceRequestError
-from app.repository.embedding_service.httpx_repository import (
+from app.repository.embedding_service.factory import EmbeddingRepositoryFactory
+from app.repository.embedding_service.fallback_local_factory import (
+    FallBackLocalEmbeddingFactory,
+)
+from app.repository.embedding_service.enterprise_embedding_service_repository import (
     EmbeddingRequest,
     EmbeddingResponse,
-    HttpxEmbeddingServiceRepository,
+    EnterpriseEmbeddingServiceRepository,
 )
 
 __all__ = [
     "EmbeddingRepository",
+    "EmbeddingRepositoryFactory",
     "EmbeddingRequest",
     "EmbeddingResponse",
     "EmbeddingServiceRequestError",
-    "HttpxEmbeddingServiceRepository",
+    "FallBackLocalEmbeddingFactory",
+    "EnterpriseEmbeddingServiceRepository",
 ]

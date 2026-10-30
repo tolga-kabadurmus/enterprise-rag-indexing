@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from qdrant_client import models
 
 from app.common.settings.qdrant import QdrantSettings
+from app.common.settings.vector import VectorProvider
 from app.repository.vector.base import SparseVector, VectorPoint, VectorRepositoryBase
 from app.repository.vector.factory import VectorRepositoryFactory
 from app.repository.vector.qdrant_repository import QdrantVectorRepository
@@ -87,9 +88,13 @@ class QdrantVectorRepositoryTests(unittest.IsolatedAsyncioTestCase):
 class VectorRepositoryFactoryTests(unittest.TestCase):
     def test_registered_qdrant_implementation_is_created_through_contract(self) -> None:
         factory = VectorRepositoryFactory()
-        factory.register("qdrant", QdrantVectorRepository)
+        factory.register(VectorProvider.QDRANT, QdrantVectorRepository)
 
-        repository = factory.create("QDRANT", FakeQdrantClient(), QdrantSettings())
+        repository = factory.create(
+            VectorProvider.QDRANT,
+            FakeQdrantClient(),
+            QdrantSettings(),
+        )
 
         self.assertIsInstance(repository, VectorRepositoryBase)
         self.assertIsInstance(repository, QdrantVectorRepository)
@@ -98,14 +103,14 @@ class VectorRepositoryFactoryTests(unittest.TestCase):
         factory = VectorRepositoryFactory()
 
         with self.assertRaisesRegex(ValueError, "unsupported vector provider"):
-            factory.create("milvus")
+            factory.create(VectorProvider.QDRANT)
 
     def test_duplicate_provider_registration_is_rejected(self) -> None:
         factory = VectorRepositoryFactory()
-        factory.register("qdrant", QdrantVectorRepository)
+        factory.register(VectorProvider.QDRANT, QdrantVectorRepository)
 
         with self.assertRaisesRegex(ValueError, "already registered"):
-            factory.register("qdrant", QdrantVectorRepository)
+            factory.register(VectorProvider.QDRANT, QdrantVectorRepository)
 
 
 if __name__ == "__main__":

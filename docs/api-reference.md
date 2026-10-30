@@ -68,10 +68,6 @@ The reference below is generated from the checked-in Python docstrings.
 
 ## Repository factory and models
 
-::: app.repository.factory
-    options:
-      members: true
-
 ::: app.repository.models
     options:
       members: true
@@ -86,7 +82,15 @@ The reference below is generated from the checked-in Python docstrings.
     options:
       members: true
 
-::: app.repository.embedding_service.httpx_repository
+::: app.repository.embedding_service.factory
+    options:
+      members: true
+
+::: app.repository.embedding_service.fallback_local_factory
+    options:
+      members: true
+
+::: app.repository.embedding_service.enterprise_embedding_service_repository
     options:
       members: true
 
@@ -107,6 +111,10 @@ The reference below is generated from the checked-in Python docstrings.
 ## S3 repository
 
 ::: app.repository.s3.base
+    options:
+      members: true
+
+::: app.repository.s3.factory
     options:
       members: true
 

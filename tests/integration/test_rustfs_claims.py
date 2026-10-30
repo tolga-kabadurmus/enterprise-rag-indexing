@@ -3,7 +3,9 @@ import unittest
 from uuid import uuid4
 
 from app.common.settings.s3 import S3Settings
-from app.repository.factory import RepositoryFactory
+from app.common.settings.s3 import StorageProvider
+from app.repository.s3.boto3_repository import S3Repository
+from app.repository.s3.factory import StorageRepositoryFactory
 
 
 @unittest.skipUnless(
@@ -13,7 +15,9 @@ from app.repository.factory import RepositoryFactory
 class RustFSClaimIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_conditional_claim_has_one_winner(self) -> None:
         settings = S3Settings()
-        repository = RepositoryFactory.create_s3(settings)
+        factory = StorageRepositoryFactory()
+        factory.register(StorageProvider.RUSTFS, S3Repository)
+        repository = factory.create(settings.provider, settings)
         claim_key = f"claims/integration-{uuid4()}.lock"
         try:
             await repository.ensure_bucket(settings.processing_bucket)

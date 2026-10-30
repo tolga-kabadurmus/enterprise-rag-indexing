@@ -7,7 +7,7 @@ from app.jobs.runner import execute_job
 from app.pipelines.base import BasePipeline
 from app.repository.embedding_service.base import EmbeddingRepository
 from app.repository.models import S3Bucket, S3ObjectMetadata
-from app.repository.s3.base import S3Repository
+from app.repository.s3.base import StorageRepositoryBase
 from app.repository.vector.base import VectorPoint, VectorRepositoryBase
 
 
@@ -48,7 +48,7 @@ class RecordingEmbeddingRepository(EmbeddingRepository):
         self.events.append("embedding-close")
 
 
-class RecordingS3Repository(S3Repository):
+class RecordingS3Repository(StorageRepositoryBase):
     def __init__(self, events: list[str]) -> None:
         self.events = events
 

@@ -1,9 +1,16 @@
 """Validated settings for the shared embedding HTTP service."""
 
-from typing import Literal
+from enum import Enum
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class EmbeddingProvider(str, Enum):
+    """Supported embedding repository provider keys."""
+
+    HTTPX = "httpx"
+    FALLBACK_LOCAL = "fallback_local"
 
 
 class EmbeddingServiceSettings(BaseSettings):
@@ -24,7 +31,7 @@ class EmbeddingServiceSettings(BaseSettings):
         min_length=1,
     )
     api_path: str = Field(default="/v1/embeddings", min_length=1)
-    provider: Literal["httpx"] = "httpx"
+    provider: EmbeddingProvider = EmbeddingProvider.HTTPX
     timeout_seconds: float = Field(default=60.0, gt=0)
     verify_tls: bool = True
     max_connections: int = Field(default=4, ge=1)
