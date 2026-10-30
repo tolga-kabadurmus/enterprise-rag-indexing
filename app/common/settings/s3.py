@@ -29,3 +29,8 @@ class S3Settings(BaseSettings):
     addressing_style: Literal["path", "virtual", "auto"] = "path"
     verify_tls: bool = True
     max_concurrency: int = Field(default=4, ge=1)
+    processing_bucket: str = Field(
+        default="documents-processing",
+        min_length=1,
+    )
+    claim_ttl_seconds: int = Field(default=3600, ge=60)

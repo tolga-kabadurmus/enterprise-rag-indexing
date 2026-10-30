@@ -69,10 +69,12 @@ methods enforce this order:
 
 ```text
 discover and validate source selection
-    -> stop successfully if the selection is empty
+    -> conditionally claim and move/resume processing objects
+    -> stop successfully if no work was claimed
     -> download configured embedding artifacts
     -> load one shared ONNX model
-    -> run once
+    -> download temporary PDF, extract text, and chunk once
+    -> clean local files and release claims
     -> release ONNX model
     -> close S3 repository
 ```

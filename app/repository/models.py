@@ -25,3 +25,4 @@ class S3ObjectMetadata(BaseModel):
     etag: str | None = None
     content_type: str | None = None
     last_modified: datetime | None = None
+    user_metadata: dict[str, str] = Field(default_factory=dict)

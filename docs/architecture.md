@@ -12,18 +12,18 @@ CLI selection
     v
 V1IndexingPipeline(BasePipeline)
     |
-    +--> S3 repository ----------> selection + complete metadata
+    +--> S3 repository ----------> claim + verified processing move + download
     +--> embedding repository ---> one loaded ONNX session
     +--> DocumentIndexerFactory -> normalized MIME routing
-    +--> PDFDocumentIndexer -----> PDFChunkerV1
-                                      |
-                                      +--> not_implemented (current boundary)
+    +--> PDFDocumentIndexer -----> PDFTextExtractorV1 -> PDFChunkerV1
+                                                              |
+                                                              +--> DocumentChunk[]
 ```
 
 The CLI, job contract, runner, side-effect-free mock, S3 repository, repository
-factory, model synchronization base pipeline, and `v1` metadata-routing job
-exist today. PDF extraction, chunk creation, embedding inference, and Qdrant
-persistence remain planned.
+factory, model synchronization base pipeline, conditional processing workflow,
+embedded PDF text extraction, and chunk creation exist today. Embedding
+inference and Qdrant persistence remain planned.
 
 ## Implemented repository layout
 
@@ -34,6 +34,7 @@ app/
 │   ├── settings/       # S3Settings and EmbeddingModelSettings
 │   └── utility/        # safe object-key-to-path conversion
 ├── document_indexers/  # MIME-selected document processing boundary
+├── document_extractors/# local text extraction and ExtractedPage models
 ├── jobs/               # v1 and offline mock top-level jobs
 ├── pipelines/          # BasePipeline startup/cleanup contract
 └── repository/
@@ -78,8 +79,8 @@ concrete job; business methods must not construct infrastructure clients.
 `RepositoryFactory` creates the RustFS-compatible S3 adapter and ONNX model
 runtime. `DocumentIndexerFactory` separately selects a document implementation
 from normalized content type. It maps `application/pdf` to a
-`PDFDocumentIndexer` composed with `PDFChunkerV1`; unsupported types are
-reported and skipped per object.
+`PDFDocumentIndexer` composed with `PDFTextExtractorV1` and `PDFChunkerV1`;
+unsupported types are reported and skipped per object.
 
 ## Source metadata
 
@@ -99,8 +100,10 @@ document contents.
 
 ## Retry and overlap rules
 
-S3 object movement is normally copy-then-delete and is not an atomic lock.
-Deterministic IDs and Qdrant upserts make retrying safe, but they do not prevent
-two overlapping jobs from doing duplicate work. Until a complete claim system
-exists, do not run overlapping jobs against the same bucket and key range.
-Never delete the only durable source after a partial failure.
+S3 object movement is copy-then-delete and is not an atomic lock. A conditional
+claim marker selects one job before movement. The processing copy is verified
+before source deletion, and deterministic processing keys support recovery.
+Claims are leases rather than transactions: a hard termination leaves a marker
+until its TTL, and an incorrectly short TTL can allow overlap. Deterministic IDs
+will support idempotent Qdrant upserts, but stale-vector replacement still needs
+to be defined with the future persistence repository.

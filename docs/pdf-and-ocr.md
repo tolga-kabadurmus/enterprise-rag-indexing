@@ -1,40 +1,32 @@
 # PDF extraction and OCR
 
-## Decision
+## Implemented text-only flow
 
-Use `pypdf` for embedded text and RapidOCR with ONNX Runtime for scanned page
-fallback. Use `pypdfium2` to render PDF pages into images accepted by RapidOCR.
+`PDFTextExtractorV1` opens the temporary local PDF with `pypdf` and returns one
+`ExtractedPage` per original page. Extraction runs through
+`asyncio.to_thread()` because PDF parsing is blocking. One-based page numbers
+are preserved through `PDFChunkerV1`, so every chunk has an unambiguous citation.
 
-The dependencies are pinned in `requirements.txt`:
+`PDFChunkerV1` normalizes embedded text and creates overlapping character
+windows without crossing page boundaries. It prefers paragraph or whitespace
+boundaries and falls back to a hard maximum for unusually long text.
 
-- `pypdf` for page-aware embedded-text extraction;
-- `pypdfium2` for permissively licensed PDF rendering;
-- `rapidocr` for detection and recognition;
-- `onnxruntime` as the CPU inference engine.
+## Explicit limitations
 
-## Planned page flow
+- No OCR is executed.
+- Images and scanned-only pages produce no text.
+- Visual layout is not reconstructed.
+- Tables are not identified or structurally represented.
+- If `pypdf` extracts table-cell text, it is chunked as ordinary text; reliably
+  excluding it requires a future layout/table detector.
+- Encrypted or malformed PDFs may fail extraction and are reported per object.
 
-For each PDF page:
+RapidOCR and `pypdfium2` remain installed for a later OCR fallback, but their
+presence must not be interpreted as implemented OCR behavior.
 
-1. Attempt embedded-text extraction with `pypdf`.
-2. Normalize the text and evaluate whether it contains meaningful content.
-3. If text is absent or below the documented threshold, render the page at a
-   configured resolution.
-4. Run RapidOCR on the rendered image.
-5. Preserve the original one-based page number and OCR confidence information.
-6. Pass page text to the chunking stage without mixing page identities.
+## Planned OCR fallback
 
-OCR should be a fallback rather than the default because rendering and model
-inference are substantially more expensive than embedded-text extraction.
-
-## Operational constraints
-
-RapidOCR inference and PDF rendering are blocking/CPU-intensive. Execute them
-outside the event loop and enforce the job concurrency limit. Initialize models
-once per worker where safe rather than once per page. Do not log page images or
-full OCR text by default.
-
-The first implementation should make the OCR threshold, rendering resolution,
-language/model route and minimum confidence configurable through validated
-environment variables. Accuracy must be checked with representative enterprise
-documents before changing model size or adding GPU support.
+A later version may render pages without useful embedded text and send them to
+RapidOCR. That change must preserve the original page number, expose confidence
+and language settings through validated configuration, run blocking work
+outside the event loop, and include dedicated accuracy tests.

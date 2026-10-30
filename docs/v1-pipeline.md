@@ -4,57 +4,68 @@
 
 `V1IndexingPipeline` is registered as `--pipeline v1` and performs:
 
-1. resolve an exact `--object-key`, or paginate the complete bucket/prefix;
-2. stop successfully without loading a model when the selection is empty;
-3. synchronize the configurable S3 embedding-model prefix;
-4. load `EMBEDDINGS_MODEL_FILE` once with ONNX Runtime;
-5. obtain full `head_object` metadata for every listed object;
-6. normalize its MIME type and route it through `DocumentIndexerFactory`;
-7. log a truthful per-object status and aggregate batch summary; and
-8. release the model and S3 client.
+1. ensure the configured processing bucket exists;
+2. discover the exact key or complete source bucket/prefix plus resumable
+   processing objects;
+3. acquire a conditional claim for each source identity;
+4. copy new sources to the processing bucket, verify their size, then delete
+   the source copy;
+5. skip model initialization when the selection is empty or every claim was
+   won by another job;
+6. synchronize and load the configured ONNX embedding model;
+7. download each claimed processing PDF into the ephemeral workspace;
+8. extract embedded page text and create page-bounded chunks;
+9. remove local temporary files and release claims; and
+10. retain processing objects for the later embedding/Qdrant stage.
 
-If neither `--object-key` nor `--key-prefix` is supplied, every object in the
-source bucket is inspected. Listed objects are processed in bounded batches
-with an `asyncio.Semaphore`; the pipeline never creates an unbounded task for
-the complete bucket.
+Discovery, claiming, and document processing use bounded batches. The pipeline
+does not create a task for every object in a large bucket.
 
-If an exact key does not exist, the S3 adapter translates the provider's 404
-into `S3ObjectNotFoundError`. The command logs one concise error to stderr and
-exits `1` before model synchronization. This is a job-level failure suitable
-for Kubernetes CronJob and Argo Workflow/Webhook status handling. If an object
-disappears after a bucket listing, that object receives `failed` while the
-remaining batch continues.
+## Claim and recovery behavior
 
-## Content routing
+A move between S3 buckets is copy-plus-delete, not an atomic rename. V1 creates
+a zero-byte claim marker with `If-None-Match: *`; only one overlapping job can
+claim a source bucket/key identity. A processing copy is verified by size
+before the source is deleted. If both copies exist after a crash, the processing
+copy is preferred and the verified source copy is removed by the next owner.
+Claim release verifies the owner metadata and deletes with `If-Match` against
+the marker ETag, so an older attempt cannot remove a replacement owner's claim.
 
-MIME parameters and casing are normalized. `application/x-pdf` maps to
-`application/pdf`. Missing and generic binary MIME values fall back to
-`application/pdf` only when the object key ends in `.pdf` case-insensitively.
+Processing keys deterministically include the original source bucket and key.
+Later invocations discover these objects and can resume them. Claims are
+released after each attempt. A hard process/pod termination can leave a marker;
+it becomes reclaimable after `S3_CLAIM_TTL_SECONDS`. This lease timeout means an
+operation running longer than the TTL could overlap with a reclaimer, so choose
+a value longer than the expected job duration.
 
-`DocumentIndexerFactory` currently maps only `application/pdf`. It creates a
-`PDFDocumentIndexer` with `PDFChunkerV1`. All other MIME types produce an
-explicit `unsupported` result and do not fail other objects.
+An exact key missing from both source and processing raises
+`S3ObjectNotFoundError`, logs a concise stderr record, and exits `1` before
+model synchronization.
 
-## Current PDF behavior
+## Text extraction and chunking
 
-`PDFChunkerV1` is a real versioned component boundary, not a simulated success.
-It currently returns:
+`DocumentIndexerFactory` maps normalized `application/pdf` to
+`PDFDocumentIndexer`, which composes two responsibilities:
 
-```text
-status=not_implemented
-chunk_count=0
-```
+- `PDFTextExtractorV1` reads a local PDF with `pypdf` outside the event loop;
+- `PDFChunkerV1` normalizes and splits each page independently.
 
-It does not download source PDF bytes, extract text, run OCR, create chunks,
-execute embedding inference, or write Qdrant points. Those are later steps.
+Chunk size and overlap are controlled by `PDF_CHUNK_SIZE` and
+`PDF_CHUNK_OVERLAP`. A chunk never crosses pages. Empty-text PDFs return
+`status=empty`; supported PDFs with text return `status=chunked`.
 
-## Results and logging
+The implementation uses embedded text only. It does not run OCR, interpret
+images, reconstruct layout, or preserve table structure. Text that `pypdf`
+extracts from table cells is treated as ordinary text.
 
-The batch summary records discovered, processed, not-implemented, unsupported,
-and failed counts. `processed` means metadata inspection completed without an
-exception; it does not mean the document was indexed.
+## Citation output
 
-DEBUG, INFO, and WARNING records go to stdout. ERROR and CRITICAL records go to
-stderr. Expected missing-object errors do not include provider tracebacks;
-unexpected per-object exceptions do. Credentials and document content are
-never logged.
+Every `DocumentChunk` contains deterministic `document_id` and `chunk_id`, the
+original source bucket/key, one-based page number, document/page chunk ordinals,
+normalized character offsets, ETag, content type, and processing location.
+This is ready to become a Qdrant point payload after an embedding vector is
+generated. Chunk text is never written to normal logs.
+
+Embedding inference and Qdrant persistence are not implemented. A `chunked`
+result means text chunks were produced, not that the document was indexed into
+the vector database.

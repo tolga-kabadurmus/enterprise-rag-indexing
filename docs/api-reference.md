@@ -54,6 +54,14 @@ The reference below is generated from the checked-in Python docstrings.
     options:
       members: true
 
+::: app.common.settings.indexing
+    options:
+      members: true
+
+::: app.common.settings.pdf_chunking
+    options:
+      members: true
+
 ## Repository factory and models
 
 ::: app.repository.factory
@@ -110,6 +118,14 @@ The reference below is generated from the checked-in Python docstrings.
     options:
       members: true
 
+::: app.document_extractors.models
+    options:
+      members: true
+
+::: app.document_extractors.pdf.v1
+    options:
+      members: true
+
 ## Logging and MIME utilities
 
 ::: app.common.utility.logging
@@ -117,6 +133,10 @@ The reference below is generated from the checked-in Python docstrings.
       members: true
 
 ::: app.common.utility.mime
+    options:
+      members: true
+
+::: app.common.utility.processing_keys
     options:
       members: true
 

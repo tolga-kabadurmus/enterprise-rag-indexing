@@ -37,14 +37,18 @@ lifecycle.
 `BasePipeline` is the ancestor for real/versioned pipelines. The registered
 `v1` pipeline first discovers an exact object or every selected bucket object.
 Only after successful, non-empty discovery does it download the configured
-embedding artifacts and load the ONNX model once. It then resolves complete S3
-metadata and processes objects concurrently in bounded batches.
-`DocumentIndexerFactory` currently routes PDFs to `PDFChunkerV1`.
+embedding artifacts and load the ONNX model once. Before model startup it uses
+a conditional claim, copies selected objects into the configurable processing
+bucket, verifies the durable copy, and only then deletes the source object.
+Claim release verifies its owner and ETag so an older attempt cannot delete a
+new owner's marker.
+`DocumentIndexerFactory` routes PDFs through `PDFTextExtractorV1` and
+`PDFChunkerV1`.
 
-`PDFChunkerV1` deliberately returns `not_implemented`: PDF extraction,
-chunk creation, embedding inference, and Qdrant persistence remain later
-steps. The registered `mock-pdf` job remains side-effect-free and does not
-contact RustFS.
+`PDFChunkerV1` returns page-bounded text chunks with deterministic document and
+chunk IDs plus source metadata suitable for later Qdrant payloads. Embedding
+inference and Qdrant persistence remain later steps. Processing objects are
+therefore retained. The registered `mock-pdf` job remains side-effect-free.
 
 ## Conceptual processing flow
 
@@ -94,7 +98,13 @@ async with PDFDocumentIndexing(...) as indexer:
 
 At minimum, indexed chunks should retain the source bucket, object key, document ID, chunk ID, and page number when available. The indexing and query services must use compatible embedding models and vector dimensions.
 
-Moving an object in S3-compatible storage is generally a **copy followed by delete**, not an atomic lock. Staging alone does not prevent simultaneous jobs from processing the same input. Use a documented claim/processing state, deterministic document/chunk identifiers, and idempotent Qdrant upserts; until cross-job claiming is implemented, avoid overlapping indexing runs on the same inputs. Do not delete the only durable source copy following a partial failure.
+Moving an object in S3-compatible storage is generally a **copy followed by
+delete**, not an atomic lock. V1 first creates an `If-None-Match: *` claim marker
+in the processing bucket. Only the winner may move and process that source
+identity. Stale claims may be reclaimed after the configured TTL. Source
+deletion occurs only after the processing copy is verified by size. A process
+crash can leave a claim until its TTL expires; this is a lease-style prototype,
+not a transactional workflow engine.
 
 ## Configuration
 
@@ -114,13 +124,18 @@ service.
 | `S3_ADDRESSING_STYLE` | `path` | boto3 addressing style |
 | `S3_VERIFY_TLS` | `false` locally | TLS certificate verification |
 | `S3_MAX_CONCURRENCY` | `4` | Maximum simultaneous blocking boto3 calls |
+| `S3_PROCESSING_BUCKET` | `documents-processing` | Durable in-progress objects and conditional claims |
+| `S3_CLAIM_TTL_SECONDS` | `3600` | Age after which an abandoned claim may be reclaimed |
 | `EMBEDDINGS_BUCKET` | `models` | Bucket containing model artifacts |
 | `EMBEDDINGS_KEY_PREFIX` | `embeddings` | Model artifact key prefix |
 | `EMBEDDINGS_LOCAL_DIRECTORY` | `/models/embeddings` | Volume-backed local model directory |
 | `EMBEDDINGS_RUNTIME` | `onnx` | Model runtime created by `RepositoryFactory` |
 | `EMBEDDINGS_MODEL_FILE` | `onnx/model.onnx` | Model artifact relative to the local directory |
+| `INDEXING_WORK_DIRECTORY` | `/work/indexing` | Ephemeral local PDF workspace |
+| `PDF_CHUNK_SIZE` | `1200` | Maximum normalized characters per chunk |
+| `PDF_CHUNK_OVERLAP` | `200` | Character overlap between adjacent page chunks |
 
-`S3Settings` and `EmbeddingModelSettings` are separate Pydantic
+The S3, embedding, workspace, and PDF chunking groups use separate Pydantic
 `BaseSettings` classes under `app/common/settings`. Never log credentials.
 
 The source-document bucket and optional key prefix are **runtime CLI
@@ -141,9 +156,9 @@ docker compose --profile dev run --rm enterprise-rag-indexing \
   --key-prefix contracts/2026/
 ```
 
-Omit both `--object-key` and `--key-prefix` to inspect every object in the
-source bucket. `v1` logs metadata and truthful per-object statuses but does not
-yet create chunks or vectors. Use `python -m app.main --list-pipelines` to see
+Omit both `--object-key` and `--key-prefix` to process every source or resumable
+processing object in the selection. `v1` creates chunks but not embeddings or
+vectors. Use `python -m app.main --list-pipelines` to see
 registered workflows. `mock-pdf` remains available for a fully offline
 lifecycle check. The Dockerfile uses `dumb-init` as its entrypoint/PID 1
 mechanism, and the development service bind-mounts the local `app` package.
@@ -173,6 +188,5 @@ Use unit tests for chunking, metadata, factories, use cases, and controllers, wi
 
 **Initial target:** PDF indexing into Qdrant with traceable source metadata and basic logging/error handling. Other document formats, advanced orchestration, CI/CD, Kubernetes/OpenShift Helm charts, and observability dashboards are potential extensions, not implemented features.
 
-The current `v1` implementation ends after metadata routing and the explicit
-`PDFChunkerV1` placeholder result. It must not be described as a complete PDF
-indexing or embedding pipeline.
+The current `v1` implementation ends after text chunk creation. It must not be
+described as a complete embedding or Qdrant indexing pipeline.

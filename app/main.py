@@ -4,7 +4,12 @@ import logging
 from collections.abc import Sequence
 
 from app.cli import run_job_cli
-from app.common.settings import EmbeddingModelSettings, S3Settings
+from app.common.settings import (
+    EmbeddingModelSettings,
+    IndexingWorkspaceSettings,
+    PDFChunkingSettings,
+    S3Settings,
+)
 from app.common.utility.logging import configure_standard_logging
 from app.document_indexers.factory import DocumentIndexerFactory
 from app.jobs.base import AsyncIndexingJob, IndexingJobArguments
@@ -22,14 +27,20 @@ def build_v1_pipeline(arguments: IndexingJobArguments) -> AsyncIndexingJob:
 
     s3_settings = S3Settings()
     embedding_settings = EmbeddingModelSettings()
+    workspace_settings = IndexingWorkspaceSettings()
+    pdf_chunking_settings = PDFChunkingSettings()
     return V1IndexingPipeline(
         arguments=arguments,
         s3_repository=RepositoryFactory.create_s3(s3_settings),
+        s3_settings=s3_settings,
         embedding_settings=embedding_settings,
+        workspace_settings=workspace_settings,
         embedding_model_repository=RepositoryFactory.create_embedding_model(
             embedding_settings
         ),
-        document_indexer_factory=DocumentIndexerFactory(),
+        document_indexer_factory=DocumentIndexerFactory(
+            pdf_chunking_settings=pdf_chunking_settings,
+        ),
     )
 
 
@@ -52,7 +63,7 @@ def build_pipeline_registry() -> IndexingPipelineRegistry:
             IndexingPipelineRegistration(
                 name="v1",
                 description=(
-                    "Inspect S3 objects and route PDFs to PDFChunkerV1"
+                    "Claim S3 PDFs and return citation-ready text chunks"
                 ),
                 job_factory=build_v1_pipeline,
             ),
@@ -71,9 +82,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         Process exit code from the shared indexing CLI runner.
 
     Note:
-        ``mock-pdf`` remains offline. ``v1`` loads the configured embedding
-        model and inspects real S3 object metadata, but chunking and vector
-        persistence are not implemented yet.
+        ``mock-pdf`` remains offline. ``v1`` returns text chunks with citation
+        metadata, but embedding inference and vector persistence remain later
+        stages.
     """
 
     configure_standard_logging(level=logging.INFO)

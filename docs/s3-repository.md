@@ -8,6 +8,10 @@
 - accessible bucket listing;
 - complete, paginated `list_objects_v2` discovery;
 - exact object metadata through `head_object`;
+- conditional claim markers using `If-None-Match: *`, with owner and ETag-safe
+  `If-Match` release;
+- copy, verified metadata lookup, and explicit deletion for processing moves;
+- creation of the application-owned processing bucket when absent;
 - atomic exact-key downloads through a temporary local file;
 - bounded prefix downloads that preserve paths below the selected prefix; and
 - idempotent client cleanup.
@@ -33,7 +37,13 @@ unrelated or stale local files.
 ## Settings
 
 `S3Settings` reads `S3_*` variables and holds the endpoint, credentials,
-region, addressing style, TLS verification, provider, and concurrency limit.
+region, addressing style, TLS verification, provider, concurrency limit,
+processing bucket, and claim TTL.
+
+| Variable | Local value | Meaning |
+| --- | --- | --- |
+| `S3_PROCESSING_BUCKET` | `documents-processing` | Durable processing objects and claim markers |
+| `S3_CLAIM_TTL_SECONDS` | `3600` | Abandoned-claim recovery timeout |
 `EmbeddingModelSettings` separately reads:
 
 | Variable | Local value | Meaning |
@@ -50,9 +60,10 @@ For example, `s3://models/embeddings/onnx/model.onnx` becomes
 ## Lifecycle and current limitation
 
 `BasePipeline.initialize()` first calls the concrete pipeline's preparation
-hook. `V1IndexingPipeline` uses it for S3 source discovery. A missing exact
-source object therefore fails before model synchronization, while an empty
-bucket/prefix selection skips model initialization as a successful no-op.
+hook. `V1IndexingPipeline` uses it for discovery, conditional claims, and
+verified movement to the processing bucket. A missing exact source and
+processing object therefore fails before model synchronization, while an empty
+or fully claimed selection skips model initialization as a successful no-op.
 For a non-empty selection, the base synchronizes the configured model prefix
 and v1 loads one `onnxruntime.InferenceSession` from `EMBEDDINGS_MODEL_FILE`.
 Cleanup releases the model reference and closes S3 even after initialization
@@ -62,5 +73,5 @@ The boto3 adapter maps `404`, `NoSuchKey`, and `NotFound` responses for exact
 object metadata/download operations to the provider-neutral
 `S3ObjectNotFoundError`, retaining the SDK exception as its chained cause.
 
-Inference is not implemented yet; loading the model currently validates the
-shared runtime lifecycle for the upcoming embedding step.
+Embedding inference is not implemented yet; loading the model currently
+validates the shared runtime lifecycle for the upcoming embedding step.

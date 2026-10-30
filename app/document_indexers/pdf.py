@@ -1,26 +1,38 @@
-"""PDF document indexer composition."""
+"""PDF extraction and chunking composition."""
 
 from app.chunkers.base import DocumentChunker
-from app.document_indexers.base import DocumentIndexer, DocumentIndexingResult
-from app.repository.models import S3ObjectMetadata
+from app.document_extractors.pdf.v1 import PDFTextExtractorV1
+from app.document_indexers.base import (
+    DocumentIndexer,
+    DocumentIndexingResult,
+    LocalDocument,
+)
 
 
 class PDFDocumentIndexer(DocumentIndexer):
-    """Coordinate the configured PDF chunker for one PDF object."""
+    """Coordinate text-only PDF extraction and page-bounded chunking."""
 
-    def __init__(self, chunker: DocumentChunker) -> None:
+    def __init__(
+        self,
+        extractor: PDFTextExtractorV1,
+        chunker: DocumentChunker,
+    ) -> None:
+        self._extractor = extractor
         self._chunker = chunker
 
-    async def index(
-        self,
-        metadata: S3ObjectMetadata,
-    ) -> DocumentIndexingResult:
-        """Delegate PDF processing to the injected versioned chunker."""
+    async def index(self, document: LocalDocument) -> DocumentIndexingResult:
+        """Extract embedded PDF text and return citation-ready chunks."""
 
-        chunking_result = await self._chunker.chunk(metadata)
+        pages = await self._extractor.extract(document.local_path)
+        chunking_result = await self._chunker.chunk(
+            document.source_metadata,
+            document.processing_metadata,
+            pages,
+        )
         return DocumentIndexingResult(
-            metadata=metadata,
+            source_metadata=document.source_metadata,
+            processing_metadata=document.processing_metadata,
             status=chunking_result.status,
-            chunk_count=chunking_result.chunk_count,
+            chunks=chunking_result.chunks,
             detail=chunking_result.detail,
         )

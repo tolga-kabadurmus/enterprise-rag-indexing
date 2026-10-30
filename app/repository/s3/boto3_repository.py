@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import UTC, datetime
 import logging
 from pathlib import Path
 from typing import Any, TypeVar
@@ -128,7 +129,173 @@ class Boto3S3Repository(S3Repository):
             etag=self._normalize_etag(response.get("ETag")),
             content_type=response.get("ContentType"),
             last_modified=response.get("LastModified"),
+            user_metadata=response.get("Metadata", {}),
         )
+
+    async def ensure_bucket(self, bucket: str) -> None:
+        """Create ``bucket`` when it does not already exist."""
+
+        try:
+            await self._call(self._client.head_bucket, Bucket=bucket)
+            return
+        except ClientError as error:
+            error_code = str(error.response.get("Error", {}).get("Code", ""))
+            if error_code not in {"404", "NoSuchBucket", "NotFound"}:
+                raise
+
+        parameters: dict[str, Any] = {"Bucket": bucket}
+        if self._settings.region != "us-east-1":
+            parameters["CreateBucketConfiguration"] = {
+                "LocationConstraint": self._settings.region,
+            }
+        await self._call(self._client.create_bucket, **parameters)
+        LOGGER.info("created S3 bucket bucket=%s", bucket)
+
+    async def try_acquire_claim(
+        self,
+        bucket: str,
+        claim_key: str,
+        owner: str,
+        stale_after_seconds: int,
+    ) -> bool:
+        """Acquire a claim with ``If-None-Match`` and reclaim stale markers."""
+
+        if await self._put_claim_if_absent(bucket, claim_key, owner):
+            return True
+        try:
+            existing = await self.get_object_metadata(bucket, claim_key)
+        except S3ObjectNotFoundError:
+            return await self._put_claim_if_absent(bucket, claim_key, owner)
+        if existing.last_modified is None:
+            return False
+        age_seconds = (datetime.now(UTC) - existing.last_modified).total_seconds()
+        if age_seconds < stale_after_seconds:
+            return False
+        if existing.etag is None or not await self._delete_if_match(
+            bucket,
+            claim_key,
+            existing.etag,
+        ):
+            return False
+        acquired = await self._put_claim_if_absent(bucket, claim_key, owner)
+        if acquired:
+            LOGGER.warning(
+                "reclaimed stale S3 claim bucket=%s claim_key=%s age_seconds=%.0f",
+                bucket,
+                claim_key,
+                age_seconds,
+            )
+        return acquired
+
+    async def release_claim(
+        self,
+        bucket: str,
+        claim_key: str,
+        owner: str,
+    ) -> bool:
+        """Release only the marker still owned by ``owner`` and its ETag."""
+
+        try:
+            existing = await self.get_object_metadata(bucket, claim_key)
+        except S3ObjectNotFoundError:
+            return True
+        if existing.user_metadata.get("owner") != owner:
+            LOGGER.warning(
+                "refused to release S3 claim owned by another job "
+                "bucket=%s claim_key=%s",
+                bucket,
+                claim_key,
+            )
+            return False
+        if existing.etag is None:
+            return False
+        return await self._delete_if_match(bucket, claim_key, existing.etag)
+
+    async def copy_object(
+        self,
+        source_bucket: str,
+        source_key: str,
+        destination_bucket: str,
+        destination_key: str,
+        content_type: str | None,
+        user_metadata: dict[str, str],
+    ) -> S3ObjectMetadata:
+        """Copy one S3 object while replacing its operational metadata."""
+
+        parameters: dict[str, Any] = {
+            "Bucket": destination_bucket,
+            "Key": destination_key,
+            "CopySource": {"Bucket": source_bucket, "Key": source_key},
+            "Metadata": user_metadata,
+            "MetadataDirective": "REPLACE",
+        }
+        if content_type is not None:
+            parameters["ContentType"] = content_type
+        await self._call(self._client.copy_object, **parameters)
+        return await self.get_object_metadata(destination_bucket, destination_key)
+
+    async def delete_object(self, bucket: str, object_key: str) -> None:
+        """Delete one exact object without logging its contents."""
+
+        await self._call(
+            self._client.delete_object,
+            Bucket=bucket,
+            Key=object_key,
+        )
+
+    async def _put_claim_if_absent(
+        self,
+        bucket: str,
+        claim_key: str,
+        owner: str,
+    ) -> bool:
+        try:
+            await self._call(
+                self._client.put_object,
+                Bucket=bucket,
+                Key=claim_key,
+                Body=b"",
+                ContentType="application/octet-stream",
+                Metadata={"owner": owner},
+                IfNoneMatch="*",
+            )
+            return True
+        except ClientError as error:
+            error_code = str(error.response.get("Error", {}).get("Code", ""))
+            status_code = error.response.get("ResponseMetadata", {}).get(
+                "HTTPStatusCode"
+            )
+            if error_code in {
+                "409",
+                "412",
+                "ConditionalRequestConflict",
+                "PreconditionFailed",
+            } or status_code in {409, 412}:
+                return False
+            raise
+
+    async def _delete_if_match(
+        self,
+        bucket: str,
+        object_key: str,
+        etag: str,
+    ) -> bool:
+        try:
+            await self._call(
+                self._client.delete_object,
+                Bucket=bucket,
+                Key=object_key,
+                IfMatch=etag,
+            )
+            return True
+        except ClientError as error:
+            error_code = str(error.response.get("Error", {}).get("Code", ""))
+            status_code = error.response.get("ResponseMetadata", {}).get(
+                "HTTPStatusCode"
+            )
+            if error_code in {"PreconditionFailed", "412"} or status_code == 412:
+                return False
+            raise
 
     async def download_object(
         self,

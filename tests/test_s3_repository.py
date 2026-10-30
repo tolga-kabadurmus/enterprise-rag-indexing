@@ -38,6 +38,11 @@ class FakeS3Client:
         self.active_downloads = 0
         self.maximum_active_downloads = 0
         self._lock = threading.Lock()
+        self.buckets = {"documents", "models"}
+        self.claim_keys: set[tuple[str, str]] = set()
+        self.claim_owners: dict[tuple[str, str], str] = {}
+        self.deleted: list[tuple[str, str]] = []
+        self.copies: list[dict] = []
 
     def list_buckets(self):
         return {
@@ -58,11 +63,55 @@ class FakeS3Client:
         if self.head_error is not None:
             raise self.head_error
         return {
-            "ContentLength": 42,
+            "ContentLength": 0 if (Bucket, Key) in self.claim_keys else 42,
             "ETag": '"etag-value"',
             "ContentType": "application/pdf",
             "LastModified": datetime(2026, 1, 2, tzinfo=UTC),
+            "Metadata": (
+                {"owner": self.claim_owners[(Bucket, Key)]}
+                if (Bucket, Key) in self.claim_keys
+                else {}
+            ),
         }
+
+    def head_bucket(self, *, Bucket: str):
+        if Bucket not in self.buckets:
+            raise ClientError(
+                {"Error": {"Code": "404", "Message": "Not Found"}},
+                "HeadBucket",
+            )
+        return {}
+
+    def create_bucket(self, **parameters):
+        self.buckets.add(parameters["Bucket"])
+        return {}
+
+    def put_object(self, *, Bucket: str, Key: str, **parameters):
+        identity = (Bucket, Key)
+        if identity in self.claim_keys and parameters.get("IfNoneMatch") == "*":
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "PreconditionFailed",
+                        "Message": "claim exists",
+                    },
+                    "ResponseMetadata": {"HTTPStatusCode": 412},
+                },
+                "PutObject",
+            )
+        self.claim_keys.add(identity)
+        self.claim_owners[identity] = parameters["Metadata"]["owner"]
+        return {}
+
+    def copy_object(self, **parameters):
+        self.copies.append(parameters)
+        return {}
+
+    def delete_object(self, *, Bucket: str, Key: str, IfMatch: str | None = None):
+        self.deleted.append((Bucket, Key))
+        self.claim_keys.discard((Bucket, Key))
+        self.claim_owners.pop((Bucket, Key), None)
+        return {}
 
     def download_file(
         self,
@@ -160,6 +209,87 @@ class Boto3S3RepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata.size, 42)
         self.assertEqual(metadata.etag, "etag-value")
         self.assertEqual(metadata.content_type, "application/pdf")
+
+    async def test_creates_missing_application_bucket(self) -> None:
+        client = FakeS3Client()
+        repository = Boto3S3Repository(make_settings(), client)
+
+        await repository.ensure_bucket("documents-processing")
+        await repository.ensure_bucket("documents-processing")
+
+        self.assertIn("documents-processing", client.buckets)
+
+    async def test_conditional_claim_allows_only_one_owner_until_release(self) -> None:
+        client = FakeS3Client()
+        repository = Boto3S3Repository(make_settings(), client)
+
+        first = await repository.try_acquire_claim(
+            "documents-processing",
+            "claims/document.lock",
+            "job-one",
+            999_999_999,
+        )
+        second = await repository.try_acquire_claim(
+            "documents-processing",
+            "claims/document.lock",
+            "job-two",
+            999_999_999,
+        )
+        await repository.release_claim(
+            "documents-processing",
+            "claims/document.lock",
+            "job-one",
+        )
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertIn(
+            ("documents-processing", "claims/document.lock"),
+            client.deleted,
+        )
+
+    async def test_claim_release_refuses_another_owner(self) -> None:
+        client = FakeS3Client()
+        repository = Boto3S3Repository(make_settings(), client)
+        await repository.try_acquire_claim(
+            "documents-processing",
+            "claims/document.lock",
+            "job-one",
+            999_999_999,
+        )
+
+        released = await repository.release_claim(
+            "documents-processing",
+            "claims/document.lock",
+            "job-two",
+        )
+
+        self.assertFalse(released)
+        self.assertIn(
+            ("documents-processing", "claims/document.lock"),
+            client.claim_keys,
+        )
+
+    async def test_copies_with_source_metadata_and_deletes_explicitly(self) -> None:
+        client = FakeS3Client()
+        repository = Boto3S3Repository(make_settings(), client)
+
+        copied = await repository.copy_object(
+            "documents",
+            "a.pdf",
+            "documents-processing",
+            "objects/documents/a.pdf",
+            "application/pdf",
+            {"source-etag": "etag-value"},
+        )
+        await repository.delete_object("documents", "a.pdf")
+
+        self.assertEqual(copied.bucket, "documents-processing")
+        self.assertEqual(client.copies[0]["MetadataDirective"], "REPLACE")
+        self.assertEqual(
+            client.deleted,
+            [("documents", "a.pdf")],
+        )
 
     async def test_translates_missing_head_to_common_repository_error(self) -> None:
         provider_error = self.not_found_error("HeadObject")

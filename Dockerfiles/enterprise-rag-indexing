@@ -7,8 +7,8 @@ RUN python -m pip install --requirement requirements.txt
 
 COPY ./app ./app
 
-RUN mkdir -p /models \
-    && chown -R appuser:appuser /models
+RUN mkdir -p /models /work/indexing \
+    && chown -R appuser:appuser /models /work/indexing
 
 USER appuser
 WORKDIR /app

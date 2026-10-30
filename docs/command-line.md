@@ -7,9 +7,8 @@ preventing arbitrary dynamic imports.
 
 !!! warning
 
-    `v1` reads real S3 metadata and loads the configured ONNX model, but
-    `PDFChunkerV1` does not yet extract or chunk PDFs. No embeddings or Qdrant
-    points are produced.
+    `v1` moves claimed sources to the processing bucket and returns text
+    chunks, but it does not yet generate embeddings or Qdrant points.
 
 ## Arguments
 
@@ -33,7 +32,8 @@ python -m app.main --list-pipelines
 ```
 
 The registry exposes `mock-pdf` and `v1`. The former is offline; the latter
-performs real model initialization and S3 metadata inspection.
+performs conditional S3 claiming, processing movement, model initialization,
+embedded PDF text extraction, and chunking.
 
 ## Selection examples
 
@@ -66,15 +66,15 @@ python -m app.main \
   --concurrency 4
 ```
 
-When `--object-key` is omitted, `v1` paginates the complete bucket selection.
-Each object receives `head_object` metadata before MIME routing. Missing or
-generic MIME values use a conservative `.pdf` extension fallback.
+When `--object-key` is omitted, `v1` paginates both the source selection and
+matching resumable objects in `S3_PROCESSING_BUCKET`. Missing or generic MIME
+values use a conservative `.pdf` extension fallback.
 
 Source discovery precedes embedding-model download and loading. A nonexistent
 exact key prints a concise error to stderr and returns exit status `1`; no model
 artifacts are synchronized. An empty bucket or prefix returns `0` as a no-op
-and also skips model initialization. An object that disappears after listing
-is isolated as a failed object instead of cancelling the whole batch.
+and also skips model initialization. A source is copied and verified before it
+is deleted; processing objects remain durable until the future Qdrant stage.
 
 ## Docker Compose
 

@@ -31,6 +31,40 @@ class RecordingS3Repository(S3Repository):
     ) -> S3ObjectMetadata:
         raise NotImplementedError
 
+    async def ensure_bucket(self, bucket: str) -> None:
+        raise NotImplementedError
+
+    async def try_acquire_claim(
+        self,
+        bucket: str,
+        claim_key: str,
+        owner: str,
+        stale_after_seconds: int,
+    ) -> bool:
+        raise NotImplementedError
+
+    async def release_claim(
+        self,
+        bucket: str,
+        claim_key: str,
+        owner: str,
+    ) -> bool:
+        raise NotImplementedError
+
+    async def copy_object(
+        self,
+        source_bucket: str,
+        source_key: str,
+        destination_bucket: str,
+        destination_key: str,
+        content_type: str | None,
+        user_metadata: dict[str, str],
+    ) -> S3ObjectMetadata:
+        raise NotImplementedError
+
+    async def delete_object(self, bucket: str, object_key: str) -> None:
+        raise NotImplementedError
+
     async def download_object(
         self,
         bucket: str,

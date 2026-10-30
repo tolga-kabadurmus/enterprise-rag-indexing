@@ -64,5 +64,11 @@ Dockerfile.
 
 The service reads `dev-envs/enterprise-rag-indexing.env` from the root
 orchestration repository and mounts the `embedding-models` named volume at
-`/models`. Copy the safe `.env.example` first and make its credentials match
-`dev-envs/rustfs.env`.
+`/models`. It also mounts `indexing-work` at `/work/indexing`. The latter is an
+ephemeral workspace: the application creates one directory per document and
+removes it after the attempt. It is not durable processing storage.
+
+Kubernetes should mount an `emptyDir` volume at the same `/work/indexing` path
+for a Job or CronJob. Processing documents remain durable in RustFS; pod-local
+files may disappear whenever the pod exits. Copy the safe `.env.example` first
+and make its credentials match `dev-envs/rustfs.env`.
