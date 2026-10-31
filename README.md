@@ -55,6 +55,48 @@ tokenizer; Qdrant applies corpus-level IDF through the sparse-vector modifier.
 Processing objects are therefore retained. The registered `mock-pdf` job remains
 side-effect-free.
 
+## Chunking strategy
+
+The current `PDFChunkerV1` uses deterministic, static character-based
+chunking:
+
+1. **PDF extraction:** `pypdf` extracts embedded text from each PDF page.
+2. **Page boundaries:** Pages are processed independently, so a chunk never
+   crosses into another page.
+3. **Text normalization:** Repeated horizontal whitespace is collapsed, lines
+   within a paragraph are joined, and paragraphs are separated by blank lines.
+4. **Chunk start:** The first chunk starts at character `0`. Each later chunk
+   starts before the previous chunk ends to preserve context.
+5. **Maximum chunk size:** The configurable default is `1,200` normalized
+   characters, calculated as `maximum_end = start + 1200` and capped at the
+   end of the page.
+6. **Boundary search area:** When more page text remains, the chunker searches
+   for a natural boundary between the midpoint and maximum end of the proposed
+   window.
+7. **Preferred boundaries:** It uses the last available paragraph break or
+   space in that search area, whichever occurs later.
+8. **Hard boundary:** If neither boundary exists, it splits exactly at the
+   maximum character limit.
+9. **Adjacent-chunk overlap:** The configurable default overlap is about `200`
+   characters: `next_start = previous_end - 200`. For example, chunks
+   `0-1200` and `1000-2200` share characters `1000-1200`.
+10. **Overlap cleanup:** If the calculated next start is whitespace, it moves
+    forward to the next non-whitespace character. The actual overlap can
+    therefore be slightly less than `200` characters.
+
+This strategy does not analyze meaning or topic changes. Its fixed size,
+overlap, and deterministic boundaries make it simple, fast, and reproducible,
+which is a reasonable baseline for this prototype.
+
+Semantic chunking instead divides text according to meaning. A future
+implementation could split pages into sentences or paragraphs, create an
+embedding for each unit, compare adjacent embeddings to detect significant
+topic changes, and group related units within a configured size limit. This
+can produce more coherent retrieval context, but requires additional model
+inference, configuration, testing, and processing time. It must also preserve
+the current page boundaries, source metadata, and deterministic chunk identity
+needed for citations and idempotent Qdrant upserts.
+
 ## Important component sequence
 
 ```mermaid
@@ -250,4 +292,15 @@ by this disposable indexing job.
 
 ## Current limitations
 
-no authenticationno authorization procesed have been covered at the project
+- Authentication and authorization are outside this prototype's scope and are
+  not implemented.
+- Only static, character-based chunking is implemented. `PDFChunkerV1` creates
+  page-bounded windows using the configured maximum character count and
+  overlap; it prefers paragraph or whitespace boundaries but does not use text
+  meaning to choose chunk boundaries. Semantic chunking is not implemented.
+- A future semantic chunker could first split each page into sentences or
+  paragraphs, request embeddings for those units, detect topic changes by
+  comparing adjacent embeddings, and group related units within a configured
+  size limit. It must preserve page and source metadata, use deterministic
+  chunk identities, expose validated threshold/size settings, and include
+  retrieval-quality and boundary tests before replacing the static strategy.
