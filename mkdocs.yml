@@ -1,0 +1,39 @@
+site_name: Enterprise RAG Indexing
+site_description: Design and developer documentation for the asynchronous indexing pipeline.
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: mkdocs
+
+nav:
+  - Overview: index.md
+  - Architecture: architecture.md
+  - Async jobs: async-jobs.md
+  - S3 repository and model sync: s3-repository.md
+  - V1 pipeline: v1-pipeline.md
+  - Command line: command-line.md
+  - PDF and OCR: pdf-and-ocr.md
+  - Development: development.md
+  - API reference: api-reference.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - .
+          options:
+            docstring_style: google
+            members_order: source
+            show_root_heading: true
+            show_source: true
+
+markdown_extensions:
+  - admonition
+  - fenced_code
+  - tables
+  - toc:
+      permalink: true

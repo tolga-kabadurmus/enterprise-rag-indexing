@@ -1,0 +1,8 @@
+boto3==1.43.121
+httpx[http2]==0.28.1
+pydantic==2.14.1
+pydantic-settings==2.16.2
+pypdf==6.19.0
+pypdfium2==5.14.0
+qdrant-client==1.20.0
+rapidocr==3.10.0
