@@ -171,14 +171,18 @@ service.
 | `EMBEDDING_SERVICE_EXPECTED_SPARSE_MODEL` | `multilingual-e5-token-frequency-v1` | Sparse encoder identity validation |
 | `VECTOR_PROVIDER` | `qdrant` | Vector implementation selected by `VectorRepositoryFactory` |
 | `QDRANT_URL` | `http://qdrant:6333` | Qdrant endpoint |
+| `QDRANT_API_KEY` | empty locally | Optional Qdrant credential, stored as a secret-aware setting |
 | `QDRANT_COLLECTION_NAME` | `enterprise_rag_chunks` | Chunk collection |
 | `QDRANT_DENSE_VECTOR_NAME` | `dense` | Dense named vector |
 | `QDRANT_SPARSE_VECTOR_NAME` | `sparse` | Token-frequency sparse named vector with Qdrant IDF |
 | `QDRANT_VECTOR_SIZE` | `384` | Dense vector dimension |
 | `QDRANT_BATCH_SIZE` | `64` | Points per upsert |
+| `QDRANT_TIMEOUT_SECONDS` | `30` | Qdrant request timeout |
+| `QDRANT_MAX_RETRIES` | `3` | Maximum attempts for retriable Qdrant writes |
+| `QDRANT_RETRY_BASE_SECONDS` | `0.25` | Base delay for retry backoff |
+| `QDRANT_CREATE_COLLECTION_IF_MISSING` | `true` | Create and validate the collection during startup |
 
-The S3, model-artifact, embedding-service, workspace, and PDF chunking groups use separate Pydantic
-`BaseSettings` classes under `app/common/settings`. Never log credentials.
+The S3, embedding-service, vector-provider, Qdrant, workspace, and PDF chunking groups use separate Pydantic `BaseSettings` classes under `app/common/settings`. `S3_ENDPOINT_URL`, `S3_ACCESS_KEY`, and `S3_SECRET_KEY` are required; the remaining values have validated defaults. Never log credentials.
 
 The source-document bucket and optional key prefix are **runtime CLI
 arguments**. `--source-bucket` overrides `S3_SOURCE_BUCKET`; when the
@@ -238,6 +242,12 @@ Use unit tests for chunking, metadata, factories, use cases, and controllers, wi
 
 **Initial target:** PDF indexing into Qdrant with traceable source metadata and basic logging/error handling. Other document formats, advanced orchestration, CI/CD, Kubernetes/OpenShift Helm charts, and observability dashboards are potential extensions, not implemented features.
 
+Authentication (authn) and authorization (authz) are outside the scope of this project and are not implemented or covered by this indexing application.
+
 The current `v1` implementation persists dense and sparse vectors to Qdrant.
 Hybrid retrieval and reranking remain query-service work and are not performed
 by this disposable indexing job.
+
+## Current limitations
+
+no authenticationno authorization procesed have been covered at the project
